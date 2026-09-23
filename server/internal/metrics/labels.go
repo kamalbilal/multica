@@ -150,6 +150,7 @@ var (
 		"codex":         "codex",
 		"copilot":       "copilot",
 		"cursor":        "cursor",
+		"cursor_sdk":    "cursor_sdk",
 		"dsh":           "dsh",
 		"gemini":        "gemini",
 		"grok":          "grok",
