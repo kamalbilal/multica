@@ -498,7 +498,7 @@ rl.on("line", (line) => {
 
 	clientCtx, clientCancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer clientCancel()
-	client, err := NewCursorSdkClient(clientCtx, script, slog.Default())
+	client, err := NewCursorSdkClient(clientCtx, script, nil, slog.Default())
 	if err != nil {
 		t.Fatalf("NewCursorSdkClient: %v", err)
 	}

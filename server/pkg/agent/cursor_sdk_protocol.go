@@ -11,13 +11,15 @@ const (
 	cursorSdkCommandCancel     = "cancel"
 	cursorSdkCommandReload     = "reload"
 	cursorSdkCommandShutdown   = "shutdown"
-	cursorSdkCommandListModels = "list-models"
+	cursorSdkCommandListModels    = "list-models"
+	cursorSdkCommandMessagesList  = "messages-list"
 
-	cursorSdkEventAgentID = "agent_id"
-	cursorSdkEventMessage = "message"
-	cursorSdkEventModels  = "models"
-	cursorSdkEventError   = "error"
-	cursorSdkEventResult  = "result"
+	cursorSdkEventAgentID  = "agent_id"
+	cursorSdkEventMessage  = "message"
+	cursorSdkEventModels   = "models"
+	cursorSdkEventMessages = "messages"
+	cursorSdkEventError    = "error"
+	cursorSdkEventResult   = "result"
 )
 
 // CursorSdkExecuteCommand is the Go → Node execute IPC payload.
@@ -64,6 +66,22 @@ type CursorSdkListModelsCommand struct {
 	Cmd       string `json:"cmd"`
 	ID        string `json:"id"`
 	APIKeyEnv string `json:"apiKeyEnv,omitempty"`
+}
+
+// CursorSdkMessagesListCommand is the Go → Node messages-list IPC payload.
+type CursorSdkMessagesListCommand struct {
+	Cmd       string `json:"cmd"`
+	ID        string `json:"id"`
+	AgentID   string `json:"agentId"`
+	Cwd       string `json:"cwd"`
+	APIKeyEnv string `json:"apiKeyEnv,omitempty"`
+}
+
+// CursorSdkMessagesListRequest configures a messages-list call on the IPC client.
+type CursorSdkMessagesListRequest struct {
+	AgentID   string
+	Cwd       string
+	APIKeyEnv string
 }
 
 // CursorSdkExecuteRequest configures a single execute call on the IPC client.
@@ -153,6 +171,12 @@ func parseCursorSdkEvent(line []byte) (CursorSdkEvent, error) {
 			return CursorSdkEvent{}, fmt.Errorf("decode cursor sdk models event: %w", err)
 		}
 		return CursorSdkEvent{Event: evt.Event, Items: evt.Items}, nil
+	case cursorSdkEventMessages:
+		var evt CursorSdkMessagesEvent
+		if err := json.Unmarshal(line, &evt); err != nil {
+			return CursorSdkEvent{}, fmt.Errorf("decode cursor sdk messages event: %w", err)
+		}
+		return CursorSdkEvent{Event: evt.Event, Items: evt.Items}, nil
 	case cursorSdkEventError:
 		var evt CursorSdkErrorEvent
 		if err := json.Unmarshal(line, &evt); err != nil {
@@ -201,6 +225,12 @@ type CursorSdkMessageEvent struct {
 
 // CursorSdkModelsEvent carries the model catalog from list-models.
 type CursorSdkModelsEvent struct {
+	Event string            `json:"event"`
+	Items []json.RawMessage `json:"items"`
+}
+
+// CursorSdkMessagesEvent carries stored transcript rows from messages-list.
+type CursorSdkMessagesEvent struct {
 	Event string            `json:"event"`
 	Items []json.RawMessage `json:"items"`
 }

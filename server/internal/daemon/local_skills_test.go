@@ -804,6 +804,14 @@ func TestListRuntimeLocalSkills_OpenClaw(t *testing.T) {
 }
 
 func TestLoadRuntimeLocalSkillBundle_Cursor(t *testing.T) {
+	testLoadRuntimeLocalSkillBundleCursorFamily(t, "cursor")
+}
+
+func TestLoadRuntimeLocalSkillBundle_CursorSdk(t *testing.T) {
+	testLoadRuntimeLocalSkillBundleCursorFamily(t, "cursor_sdk")
+}
+
+func testLoadRuntimeLocalSkillBundleCursorFamily(t *testing.T, provider string) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
 
@@ -814,12 +822,12 @@ func TestLoadRuntimeLocalSkillBundle_Cursor(t *testing.T) {
 		".hidden/skip.txt": "ignore",
 	})
 
-	bundle, supported, err := loadRuntimeLocalSkillBundle("cursor", "docs-helper")
+	bundle, supported, err := loadRuntimeLocalSkillBundle(provider, "docs-helper")
 	if err != nil {
 		t.Fatalf("loadRuntimeLocalSkillBundle: %v", err)
 	}
 	if !supported {
-		t.Fatal("cursor should be supported")
+		t.Fatalf("%s should be supported", provider)
 	}
 	if bundle.Name != "Docs Helper" {
 		t.Fatalf("name = %q", bundle.Name)

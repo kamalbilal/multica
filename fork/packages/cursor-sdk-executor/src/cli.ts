@@ -1,9 +1,11 @@
+import "./ipc-stdout-guard.js";
 import readline from "node:readline";
 import type { IpcCommand } from "./protocol.js";
+import { writeIpcLine } from "./ipc-stdout-guard.js";
 import { dispatchCommand } from "./executor.js";
 
 function emit(event: unknown): void {
-  process.stdout.write(`${JSON.stringify(event)}\n`);
+  writeIpcLine(`${JSON.stringify(event)}\n`);
 }
 
 function logError(message: string): void {
@@ -15,6 +17,8 @@ async function main(): Promise<void> {
     input: process.stdin,
     crlfDelay: Infinity,
   });
+
+  let commandQueue = Promise.resolve();
 
   for await (const line of rl) {
     const trimmed = line.trim();
@@ -30,14 +34,15 @@ async function main(): Promise<void> {
       continue;
     }
 
-    if (cmd.cmd === "shutdown") {
-      await dispatchCommand(cmd, emit);
-      process.exit(0);
-    }
-
-    void dispatchCommand(cmd, emit).catch((err) => {
+    const run = commandQueue.then(() => dispatchCommand(cmd, emit));
+    commandQueue = run.catch((err) => {
       logError(err instanceof Error ? err.message : String(err));
     });
+
+    if (cmd.cmd === "shutdown") {
+      await run;
+      process.exit(0);
+    }
   }
 }
 

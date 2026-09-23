@@ -10,6 +10,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"sync"
 	"sync/atomic"
 )
@@ -45,10 +46,13 @@ type CursorSdkClient struct {
 
 	listModelsMu sync.Mutex
 	listModelsCh chan CursorSdkEvent
+
+	messagesListMu sync.Mutex
+	messagesListCh chan CursorSdkEvent
 }
 
 // NewCursorSdkClient spawns the Node executor and starts its stdout reader.
-func NewCursorSdkClient(ctx context.Context, executorPath string, logger *slog.Logger) (*CursorSdkClient, error) {
+func NewCursorSdkClient(ctx context.Context, executorPath string, env map[string]string, logger *slog.Logger) (*CursorSdkClient, error) {
 	if logger == nil {
 		logger = slog.Default()
 	}
@@ -60,6 +64,7 @@ func NewCursorSdkClient(ctx context.Context, executorPath string, logger *slog.L
 
 	runCtx, cancel := context.WithCancel(ctx)
 	cmd := exec.CommandContext(runCtx, node, script)
+	cmd.Env = buildEnv(env)
 	stdin, err := cmd.StdinPipe()
 	if err != nil {
 		cancel()
@@ -104,12 +109,9 @@ func ResolveCursorSdkExecutor(executorPath string) (node string, script string, 
 }
 
 func resolveCursorSdkExecutor(executorPath string) (node string, script string, err error) {
-	script = executorPath
-	if script == "" {
-		script = os.Getenv(cursorSdkExecutorEnv)
-	}
-	if script == "" {
-		script = defaultCursorSdkExecutorRelPath
+	script, err = locateCursorSdkExecutorScript(executorPath)
+	if err != nil {
+		return "", "", err
 	}
 
 	node, err = exec.LookPath("node")
@@ -117,11 +119,79 @@ func resolveCursorSdkExecutor(executorPath string) (node string, script string, 
 		return "", "", fmt.Errorf("cursor sdk executor requires node on PATH: %w", err)
 	}
 
-	if _, statErr := os.Stat(script); statErr != nil {
-		return "", "", fmt.Errorf("cursor sdk executor script not found at %q: %w", script, statErr)
-	}
-
 	return node, script, nil
+}
+
+func locateCursorSdkExecutorScript(executorPath string) (string, error) {
+	trimmed := strings.TrimSpace(executorPath)
+	env := strings.TrimSpace(os.Getenv(cursorSdkExecutorEnv))
+
+	if trimmed != "" {
+		if abs, ok := findCursorSdkExecutorScript(trimmed); ok {
+			return abs, nil
+		}
+		return "", fmt.Errorf("cursor sdk executor script not found at %s", trimmed)
+	}
+	if env != "" {
+		if abs, ok := findCursorSdkExecutorScript(env); ok {
+			return abs, nil
+		}
+		return "", fmt.Errorf(
+			"cursor sdk executor script not found at %s (from %s)",
+			env,
+			cursorSdkExecutorEnv,
+		)
+	}
+	if abs, ok := findCursorSdkExecutorScript(defaultCursorSdkExecutorRelPath); ok {
+		return abs, nil
+	}
+	return "", fmt.Errorf(
+		"cursor sdk executor script not found; build with 'make cursor-sdk-executor' or set %s",
+		cursorSdkExecutorEnv,
+	)
+}
+
+func findCursorSdkExecutorScript(path string) (string, bool) {
+	if filepath.IsAbs(path) {
+		if _, err := os.Stat(path); err == nil {
+			return filepath.Clean(path), true
+		}
+		return "", false
+	}
+	if wd, err := os.Getwd(); err == nil {
+		if abs, ok := searchCursorSdkExecutorFromDir(wd, path); ok {
+			return abs, true
+		}
+	}
+	if exe, err := os.Executable(); err == nil {
+		if abs, ok := searchCursorSdkExecutorFromDir(filepath.Dir(exe), path); ok {
+			return abs, true
+		}
+	}
+	return "", false
+}
+
+func searchCursorSdkExecutorFromDir(start, rel string) (string, bool) {
+	dir := start
+	for {
+		candidate := filepath.Join(dir, rel)
+		if _, err := os.Stat(candidate); err == nil {
+			return filepath.Clean(candidate), true
+		}
+		parent := filepath.Dir(dir)
+		if parent == dir {
+			break
+		}
+		dir = parent
+	}
+	return "", false
+}
+
+func truncateCursorSdkLogLine(line string, max int) string {
+	if max <= 0 || len(line) <= max {
+		return line
+	}
+	return line[:max] + "..."
 }
 
 func (c *CursorSdkClient) copyStderr(stderr io.Reader) {
@@ -132,14 +202,25 @@ func (c *CursorSdkClient) readStdout(stdout io.Reader) {
 	defer close(c.readDone)
 
 	scanner := newAgentStreamScanner(stdout)
+	var skippedNonIPCLines int
 	for scanner.Scan() {
-		evt, err := parseCursorSdkEvent(scanner.Bytes())
+		line := normalizeCursorStreamLine(scanner.Text())
+		if line == "" {
+			continue
+		}
+		evt, err := parseCursorSdkEvent([]byte(line))
 		if err != nil {
-			c.readErr = err
-			c.logger.Error("cursor sdk event parse failed", "error", err)
-			return
+			skippedNonIPCLines++
+			c.logger.Warn("cursor sdk skipping non-ipc stdout line",
+				"error", err,
+				"line", truncateCursorSdkLogLine(line, 240))
+			continue
 		}
 		c.dispatchEvent(evt)
+	}
+	if skippedNonIPCLines > 0 {
+		c.logger.Debug("cursor sdk ignored non-ipc stdout lines",
+			"count", skippedNonIPCLines)
 	}
 	if err := scanner.Err(); err != nil {
 		c.readErr = err
@@ -175,24 +256,30 @@ func (c *CursorSdkClient) dispatchEvent(evt CursorSdkEvent) {
 			c.executeMu.Unlock()
 			close(execDone)
 		}
-		c.listModelsMu.Lock()
-		ch := c.listModelsCh
-		c.listModelsMu.Unlock()
-		if ch != nil {
-			select {
-			case ch <- evt:
-			default:
-			}
+		c.routeAuxiliaryEvent(evt)
+	case cursorSdkEventModels, cursorSdkEventMessages:
+		c.routeAuxiliaryEvent(evt)
+	}
+}
+
+func (c *CursorSdkClient) routeAuxiliaryEvent(evt CursorSdkEvent) {
+	c.listModelsMu.Lock()
+	listCh := c.listModelsCh
+	c.listModelsMu.Unlock()
+	if listCh != nil {
+		select {
+		case listCh <- evt:
+		default:
 		}
-	case cursorSdkEventModels:
-		c.listModelsMu.Lock()
-		ch := c.listModelsCh
-		c.listModelsMu.Unlock()
-		if ch != nil {
-			select {
-			case ch <- evt:
-			default:
-			}
+	}
+
+	c.messagesListMu.Lock()
+	messagesCh := c.messagesListCh
+	c.messagesListMu.Unlock()
+	if messagesCh != nil {
+		select {
+		case messagesCh <- evt:
+		default:
 		}
 	}
 }
@@ -399,6 +486,53 @@ func (c *CursorSdkClient) ListModels(ctx context.Context, apiKeyEnv string) ([]j
 			return nil, c.readErr
 		}
 		return nil, errors.New("cursor sdk executor exited during list-models")
+	}
+}
+
+// MessagesList queries stored transcript rows for a local agent.
+func (c *CursorSdkClient) MessagesList(ctx context.Context, req CursorSdkMessagesListRequest) ([]json.RawMessage, error) {
+	ch := make(chan CursorSdkEvent, 1)
+	c.messagesListMu.Lock()
+	if c.messagesListCh != nil {
+		c.messagesListMu.Unlock()
+		return nil, errors.New("cursor sdk messages-list already in progress")
+	}
+	c.messagesListCh = ch
+	c.messagesListMu.Unlock()
+
+	defer func() {
+		c.messagesListMu.Lock()
+		c.messagesListCh = nil
+		c.messagesListMu.Unlock()
+	}()
+
+	if err := c.writeCommand(CursorSdkMessagesListCommand{
+		Cmd:       cursorSdkCommandMessagesList,
+		ID:        c.nextCommandID(),
+		AgentID:   req.AgentID,
+		Cwd:       req.Cwd,
+		APIKeyEnv: req.APIKeyEnv,
+	}); err != nil {
+		return nil, err
+	}
+
+	select {
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	case evt := <-ch:
+		switch evt.Event {
+		case cursorSdkEventMessages:
+			return evt.Items, nil
+		case cursorSdkEventError:
+			return nil, fmt.Errorf("%s", evt.Message)
+		default:
+			return nil, fmt.Errorf("unexpected cursor sdk messages-list event %q", evt.Event)
+		}
+	case <-c.readDone:
+		if c.readErr != nil {
+			return nil, c.readErr
+		}
+		return nil, errors.New("cursor sdk executor exited during messages-list")
 	}
 }
 

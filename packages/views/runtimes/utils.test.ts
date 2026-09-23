@@ -500,6 +500,23 @@ describe("estimateCost", () => {
     expect(costWithAllTokenTypes("cursor")).toBeCloseTo(3 + 15 + 0.5, 5);
   });
 
+  it("prices cursor_sdk usage rows with the same Cursor Composer rates as cursor", () => {
+    const cursorCost = estimateCost({
+      ...zeroUsage,
+      provider: "cursor",
+      model: "auto",
+      input_tokens: 1_000_000,
+    });
+    const sdkCost = estimateCost({
+      ...zeroUsage,
+      provider: "cursor_sdk",
+      model: "auto",
+      input_tokens: 1_000_000,
+    });
+    expect(sdkCost).toBeCloseTo(cursorCost, 5);
+    expect(sdkCost).toBeCloseTo(1.25, 5);
+  });
+
   it("scopes the generic `auto` id by provider so collisions don't borrow a price", () => {
     const auto = (provider?: string) =>
       estimateCost({ ...zeroUsage, provider, model: "auto", input_tokens: 1_000_000 });

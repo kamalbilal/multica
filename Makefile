@@ -1,4 +1,4 @@
-.PHONY: help makehelp dev server daemon cli multica build test migrate-up migrate-down sqlc seed clean setup start stop check worktree-env setup-main start-main stop-main check-main setup-worktree start-worktree stop-worktree check-worktree remove-worktree db-up db-down db-drop db-reset selfhost selfhost-build selfhost-stop up down status list destroy gc env-exec api-dev web-dev desktop-dev
+.PHONY: help makehelp dev server daemon cli multica build test migrate-up migrate-down sqlc seed clean setup start stop check worktree-env setup-main start-main stop-main check-main setup-worktree start-worktree stop-worktree check-worktree remove-worktree db-up db-down db-drop db-reset selfhost selfhost-build selfhost-stop up down status list destroy gc env-exec api-dev web-dev desktop-dev cursor-sdk-executor
 
 MAIN_ENV_FILE ?= .env
 WORKTREE_ENV_FILE ?= .env.worktree
@@ -306,6 +306,11 @@ remove-worktree: ## Drop a linked worktree's database, then remove it (WORKTREE=
 
 dev: ## Bootstrap this checkout end-to-end: create env if needed, ensure DB, migrate, start services
 	@bash scripts/dev.sh
+
+CURSOR_SDK_EXECUTOR_DIR := fork/packages/cursor-sdk-executor
+
+cursor-sdk-executor: ## Build the cursor_sdk Node executor (required before using cursor_sdk provider)
+	cd $(CURSOR_SDK_EXECUTOR_DIR) && npm ci && npm run build
 
 server: ## Run only the Go server for the current checkout
 	$(REQUIRE_ENV)

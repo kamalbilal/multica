@@ -426,6 +426,12 @@ function normalizeProvider(provider?: string): string {
   return provider?.trim().toLowerCase() ?? "";
 }
 
+// cursor_sdk shares Cursor Composer pricing rows keyed under `cursor/*`.
+function pricingProvider(provider?: string): string {
+  const p = normalizeProvider(provider);
+  return p === "cursor_sdk" ? "cursor" : p;
+}
+
 // Provider-qualify a key, skipping the prefix when the key already carries
 // this provider (an upstream-qualified `cursor/auto` must not become
 // `cursor/cursor/auto`). `provider` must already be normalized.
@@ -439,7 +445,7 @@ function qualify(provider: string, key: string): string {
 // beats an unqualified one.
 function pricingCandidates(model: string, provider?: string): string[] {
   const base = canonicalCandidates(model);
-  const p = normalizeProvider(provider);
+  const p = pricingProvider(provider);
   if (!p) return base;
   return [...base.map((c) => qualify(p, c)), ...base];
 }

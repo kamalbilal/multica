@@ -1035,6 +1035,14 @@ type healOutcome struct {
 // fails, and reports "version detection failed" — which by design leaves the
 // runtime online, claiming tasks for a CLI that cannot launch.
 func (d *Daemon) resolveAgentEntryWithHeal(ctx context.Context, provider string, entry AgentEntry) (AgentEntry, string, healOutcome) {
+	if provider == "cursor_sdk" {
+		version, err := verifyCursorSdkAgentEntry(entry)
+		if err != nil {
+			return entry, d.agentVersion(provider), healOutcome{failure: err}
+		}
+		return entry, version, healOutcome{}
+	}
+
 	// Windows installer entry points are stable junctions whose final target can
 	// change while the old release remains installed. Resolve the final path on
 	// every launch and adopt a changed target only after pairing it with a freshly
@@ -1191,7 +1199,13 @@ func (d *Daemon) adoptAgentPath(ctx context.Context, provider, command, newPath,
 	// older or broken install must not be launched under the daemon's stale
 	// version policy, and must not slip past the minimum-version gate that the
 	// registration path applies (MUL-4486 review).
-	version, err := detectAgentVersion(ctx, agent.Command{Path: newPath})
+	var version string
+	var err error
+	if provider == "cursor_sdk" {
+		version, err = verifyCursorSdkAgentEntry(AgentEntry{Path: newPath, Command: command})
+	} else {
+		version, err = detectAgentVersion(ctx, agent.Command{Path: newPath})
+	}
 	if err != nil {
 		d.logger.Warn("re-resolved agent executable failed version detection; keeping pinned path",
 			"provider", provider, "command", command, "new_path", newPath, "error", err)
@@ -2585,6 +2599,28 @@ probeLoop:
 			d.logger.Warn("skip registering runtime: re-resolved version too old",
 				"name", name, "version", heal.rejected.Detected, "error", heal.rejected.Error())
 			return heal.rejected.Detected, heal.rejected.Error(), builtinProbeBelowMinimum
+		}
+		// cursor_sdk launches node <executor.js> over JSONL; the script is not a
+		// native executable and has no --version flag. Verify the script exists
+		// and treat the bundled executor as versioned synthetically.
+		if name == "cursor_sdk" {
+			version, err := verifyCursorSdkAgentEntry(resolved)
+			if err != nil {
+				lastErr = err
+				if time.Since(startedAt) >= runtimeVersionProbeRetryWindow {
+					break probeLoop
+				}
+				if attempts < runtimeVersionProbeAttempts {
+					d.logger.Debug("cursor sdk executor check failed; retrying",
+						"name", name, "attempt", attempts, "error", err)
+				}
+				continue
+			}
+			d.setAgentVersion(name, version)
+			d.refreshHealedVersion(name, resolved.Path, version)
+			d.logger.Debug("agent version detected", "name", name, "version", version,
+				"path", resolved.Path, "node", resolved.Command)
+			return version, "", builtinProbeOK
 		}
 		version, err := detectAgentVersion(ctx, agent.Command{Path: resolved.Path})
 		if err != nil {

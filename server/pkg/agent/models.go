@@ -209,6 +209,10 @@ func ListModels(ctx context.Context, providerType string, runtimeCmd Command) (C
 		return cachedDiscovery(discoveryCacheKey(providerType, runtimeCmd), func() (Catalog, error) {
 			return discoverCursorModels(ctx, runtimeCmd)
 		})
+	case "cursor_sdk":
+		return cachedDiscovery(discoveryCacheKey(providerType, runtimeCmd), func() (Catalog, error) {
+			return discoverCursorSdkModels(ctx, runtimeCmd)
+		})
 	case "copilot":
 		return cachedDiscovery(discoveryCacheKey(providerType, runtimeCmd), func() (Catalog, error) {
 			return discoverCopilotModels(ctx, runtimeCmd)

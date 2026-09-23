@@ -6,6 +6,9 @@ const mockSend = vi.fn<SDKAgent["send"]>();
 const mockCreate = vi.fn<(options: unknown) => Promise<SDKAgent>>();
 const mockResume = vi.fn<(agentId: string, options?: unknown) => Promise<SDKAgent>>();
 const mockModelsList = vi.fn<(options?: { apiKey?: string }) => Promise<unknown[]>>();
+const mockMessagesList = vi.fn<
+  (agentId: string, options?: { runtime?: string; cwd?: string }) => Promise<unknown[]>
+>();
 
 function createMockAgent(agentId = "agent-test-1"): SDKAgent {
   return {
@@ -49,6 +52,9 @@ vi.mock("@cursor/sdk", () => ({
   Agent: {
     create: (...args: unknown[]) => mockCreate(...args),
     resume: (...args: unknown[]) => mockResume(...args),
+    messages: {
+      list: (...args: unknown[]) => mockMessagesList(...args),
+    },
   },
   Cursor: {
     models: {
@@ -208,5 +214,38 @@ describe("executor", () => {
 
     expect(mockModelsList).toHaveBeenCalledWith({ apiKey: "test-api-key" });
     expect(events).toEqual([{ event: "models", items: [{ id: "composer-2.5" }] }]);
+  });
+
+  it("messages-list emits messages event", async () => {
+    mockMessagesList.mockResolvedValue([
+      { type: "assistant", message: { role: "assistant", content: [{ type: "text", text: "hello" }] } },
+    ]);
+
+    const events: unknown[] = [];
+    await dispatchCommand(
+      {
+        cmd: "messages-list",
+        id: "req-5",
+        agentId: "agent-test-1",
+        cwd: "/tmp/workdir",
+      },
+      (event) => events.push(event),
+    );
+
+    expect(mockMessagesList).toHaveBeenCalledWith("agent-test-1", {
+      runtime: "local",
+      cwd: "/tmp/workdir",
+    });
+    expect(events).toEqual([
+      {
+        event: "messages",
+        items: [
+          {
+            type: "assistant",
+            message: { role: "assistant", content: [{ type: "text", text: "hello" }] },
+          },
+        ],
+      },
+    ]);
   });
 });

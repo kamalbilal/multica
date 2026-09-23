@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"os"
 	"strings"
 	"sync/atomic"
@@ -27,7 +28,7 @@ func (b *cursorSdkBackend) Execute(ctx context.Context, prompt string, opts Exec
 	timeout := opts.Timeout
 	runCtx, cancel := runContext(ctx, timeout)
 
-	client, err := NewCursorSdkClient(runCtx, b.cfg.ExecutablePath, b.cfg.Logger)
+	client, err := NewCursorSdkClient(runCtx, b.cfg.ExecutablePath, b.cfg.Env, b.cfg.Logger)
 	if err != nil {
 		cancel()
 		return nil, err
@@ -65,15 +66,6 @@ func (b *cursorSdkBackend) Execute(ctx context.Context, prompt string, opts Exec
 
 		startTime := time.Now()
 		configuredModel := strings.TrimSpace(opts.Model)
-		req, err := buildCursorSdkExecuteRequest(prompt, opts, b.cfg.Env)
-		if err != nil {
-			resCh <- Result{
-				Status:     "failed",
-				Error:      sanitizeAgentDiagnostic(err.Error()),
-				DurationMs: time.Since(startTime).Milliseconds(),
-			}
-			return
-		}
 
 		var output strings.Builder
 		sessionID := ""
@@ -82,33 +74,106 @@ func (b *cursorSdkBackend) Execute(ctx context.Context, prompt string, opts Exec
 		resultSeen := false
 		var resultUsage map[string]TokenUsage
 
-		sdkResult, execErr := client.Execute(runCtx, req, func(evt CursorSdkEvent) {
-			switch evt.Event {
-			case cursorSdkEventAgentID:
-				sessionID = strings.TrimSpace(evt.AgentID)
-				if reloadAfterMcpRefresh && reloadedAfterMcpRefresh.CompareAndSwap(false, true) {
-					reloadCtx := context.WithoutCancel(runCtx)
-					if err := client.Reload(reloadCtx); err != nil {
-						b.cfg.Logger.Warn("cursor sdk reload after mcp refresh failed", "error", err)
-					}
+		turnPrompt := prompt
+		attemptOpts := opts
+		resumeSessionForBackfill := strings.TrimSpace(opts.ResumeSessionID)
+		var execErr error
+		var sdkResult CursorSdkResult
+
+		for attempt := 0; attempt < 2; attempt++ {
+			output.Reset()
+			sessionID = ""
+			resultSeen = false
+			resultUsage = nil
+			finalStatus = "completed"
+			finalError = ""
+			runRunning.Store(false)
+
+			req, buildErr := buildCursorSdkExecuteRequest(turnPrompt, attemptOpts, b.cfg.Env)
+			if buildErr != nil {
+				resCh <- Result{
+					Status:     "failed",
+					Error:      sanitizeAgentDiagnostic(buildErr.Error()),
+					DurationMs: time.Since(startTime).Milliseconds(),
 				}
-			case cursorSdkEventMessage:
-				if msg, ok := cursorSdkMessageFromEvent(evt); ok {
-					if msg.Type == MessageStatus && msg.Status == "running" {
-						runRunning.Store(true)
-					}
-					if msg.Type == MessageText {
-						output.WriteString(msg.Content)
-					}
-					trySend(msgCh, msg)
-				}
-			case cursorSdkEventError:
-				errMsg := strings.TrimSpace(evt.Message)
-				if errMsg != "" {
-					trySend(msgCh, Message{Type: MessageError, Content: errMsg})
-				}
+				return
 			}
-		})
+
+			sdkResult, execErr = client.Execute(runCtx, req, func(evt CursorSdkEvent) {
+				switch evt.Event {
+				case cursorSdkEventAgentID:
+					sessionID = strings.TrimSpace(evt.AgentID)
+					runRunning.Store(true)
+					if reloadAfterMcpRefresh && reloadedAfterMcpRefresh.CompareAndSwap(false, true) {
+						reloadCtx := context.WithoutCancel(runCtx)
+						if err := client.Reload(reloadCtx); err != nil {
+							b.cfg.Logger.Warn("cursor sdk reload after mcp refresh failed", "error", err)
+						}
+					}
+				case cursorSdkEventMessage:
+					if msg, ok := cursorSdkMessageFromEvent(evt); ok {
+						if msg.Type == MessageStatus && msg.Status == "running" {
+							runRunning.Store(true)
+						}
+						if msg.Type == MessageText {
+							output.WriteString(msg.Content)
+						}
+						trySend(msgCh, msg)
+					}
+				case cursorSdkEventError:
+					errMsg := strings.TrimSpace(evt.Message)
+					if errMsg != "" {
+						trySend(msgCh, Message{Type: MessageError, Content: errMsg})
+					}
+				}
+			})
+
+			if execErr == nil {
+				resultSeen = true
+				if sessionID == "" {
+					sessionID = strings.TrimSpace(sdkResult.AgentID)
+				}
+				switch strings.TrimSpace(sdkResult.Status) {
+				case "completed", "finished":
+					finalStatus = "completed"
+				case "cancelled", "canceled", "aborted":
+					finalStatus = "aborted"
+				case "failed", "error":
+					finalStatus = "failed"
+				default:
+					if sdkResult.Status != "" {
+						finalStatus = sdkResult.Status
+					}
+				}
+				if sdkResult.Output != "" && output.Len() == 0 {
+					output.WriteString(sdkResult.Output)
+					trySend(msgCh, Message{Type: MessageText, Content: sdkResult.Output})
+				}
+				if finalStatus == "failed" {
+					finalError = strings.TrimSpace(sdkResult.Error)
+					if finalError == "" {
+						finalError = "cursor sdk returned an error result without details"
+					}
+				}
+				resultUsage = cursorSdkUsageFromResult(sdkResult.Usage, configuredModel)
+			}
+
+			shouldBackfill := resumeSessionForBackfill != "" && (execErr != nil || !resultSeen)
+			if shouldBackfill {
+				cursorSdkBackfillTranscript(runCtx, client, msgCh, b.cfg.Logger, resumeSessionForBackfill, opts.Cwd)
+			}
+
+			if attempt == 0 && execErr != nil && cursorSdkIsResumeError(execErr) && opts.ResumeExpected {
+				b.cfg.Logger.Warn("cursor sdk resume failed; retrying with fresh agent",
+					"prior_agent_id", attemptOpts.ResumeSessionID,
+					"error", execErr,
+				)
+				attemptOpts.ResumeSessionID = ""
+				turnPrompt = cursorSdkTurnPrompt(prompt, opts)
+				continue
+			}
+			break
+		}
 
 		duration := time.Since(startTime)
 		if execErr != nil {
@@ -123,34 +188,6 @@ func (b *cursorSdkBackend) Execute(ctx context.Context, prompt string, opts Exec
 				finalStatus = "failed"
 				finalError = execErr.Error()
 			}
-		} else {
-			resultSeen = true
-			if sessionID == "" {
-				sessionID = strings.TrimSpace(sdkResult.AgentID)
-			}
-			switch strings.TrimSpace(sdkResult.Status) {
-			case "completed", "finished":
-				finalStatus = "completed"
-			case "cancelled", "canceled", "aborted":
-				finalStatus = "aborted"
-			case "failed", "error":
-				finalStatus = "failed"
-			default:
-				if sdkResult.Status != "" {
-					finalStatus = sdkResult.Status
-				}
-			}
-			if sdkResult.Output != "" && output.Len() == 0 {
-				output.WriteString(sdkResult.Output)
-				trySend(msgCh, Message{Type: MessageText, Content: sdkResult.Output})
-			}
-			if finalStatus == "failed" {
-				finalError = strings.TrimSpace(sdkResult.Error)
-				if finalError == "" {
-					finalError = "cursor sdk returned an error result without details"
-				}
-			}
-			resultUsage = cursorSdkUsageFromResult(sdkResult.Usage, configuredModel)
 		}
 
 		if finalError != "" {
@@ -273,6 +310,107 @@ func cursorSdkMessageFromEvent(evt CursorSdkEvent) (Message, bool) {
 	default:
 		return Message{}, false
 	}
+}
+
+func cursorSdkIsResumeError(err error) bool {
+	if err == nil {
+		return false
+	}
+	lower := strings.ToLower(err.Error())
+	if strings.Contains(lower, "agent not found") {
+		return true
+	}
+	return strings.Contains(lower, "agent ") && strings.Contains(lower, " not found")
+}
+
+func cursorSdkTurnPrompt(prompt string, opts ExecOptions) string {
+	notice := strings.TrimSpace(opts.ResumeContinuityNotice)
+	if notice == "" {
+		return prompt
+	}
+	return notice + prompt
+}
+
+func cursorSdkBackfillTranscript(
+	ctx context.Context,
+	client *CursorSdkClient,
+	msgCh chan Message,
+	logger *slog.Logger,
+	agentID string,
+	cwd string,
+) {
+	backfillCtx := context.WithoutCancel(ctx)
+	items, listErr := client.MessagesList(backfillCtx, CursorSdkMessagesListRequest{
+		AgentID:   agentID,
+		Cwd:       cwd,
+		APIKeyEnv: cursorSdkDefaultAPIKeyEnv,
+	})
+	if listErr != nil {
+		logger.Warn("cursor sdk messages.list backfill failed", "error", listErr)
+		return
+	}
+	for _, msg := range cursorSdkBackfillMessages(items) {
+		trySend(msgCh, msg)
+	}
+}
+
+func cursorSdkBackfillMessages(items []json.RawMessage) []Message {
+	var messages []Message
+	for _, raw := range items {
+		var entry struct {
+			Type    string          `json:"type"`
+			Message json.RawMessage `json:"message"`
+		}
+		if err := json.Unmarshal(raw, &entry); err != nil || entry.Type != "assistant" {
+			continue
+		}
+		text := cursorSdkExtractMessageText(entry.Message)
+		if text == "" {
+			continue
+		}
+		messages = append(messages, Message{Type: MessageText, Content: text})
+	}
+	return messages
+}
+
+func cursorSdkExtractMessageText(raw json.RawMessage) string {
+	if len(raw) == 0 {
+		return ""
+	}
+	var payload struct {
+		Content json.RawMessage `json:"content"`
+	}
+	if err := json.Unmarshal(raw, &payload); err != nil {
+		return ""
+	}
+	if len(payload.Content) == 0 {
+		return ""
+	}
+	switch payload.Content[0] {
+	case '"':
+		var text string
+		if err := json.Unmarshal(payload.Content, &text); err == nil {
+			return strings.TrimSpace(text)
+		}
+	case '[':
+		var blocks []struct {
+			Type string `json:"type"`
+			Text string `json:"text"`
+		}
+		if err := json.Unmarshal(payload.Content, &blocks); err != nil {
+			return ""
+		}
+		var parts []string
+		for _, block := range blocks {
+			if block.Type == "text" && strings.TrimSpace(block.Text) != "" {
+				parts = append(parts, block.Text)
+			}
+		}
+		return strings.TrimSpace(strings.Join(parts, "\n"))
+	default:
+		return ""
+	}
+	return ""
 }
 
 func cursorSdkUsageFromResult(raw json.RawMessage, configuredModel string) map[string]TokenUsage {

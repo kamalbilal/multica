@@ -346,7 +346,7 @@ type Config struct {
 }
 
 // New creates a Backend for the given agent type.
-// Supported types: "claude", "codebuddy", "codex", "copilot", "opencode", "codearts", "deveco", "openclaw", "hermes", "pi", "cursor", "kimi", "reasonix", "dsh", "kiro", "antigravity", "qoder", "qoderclicn", "traecli", "grok", "qwen", "qwenpaw", "mcode".
+// Supported types: "claude", "codebuddy", "codex", "copilot", "opencode", "codearts", "deveco", "openclaw", "hermes", "pi", "cursor", "cursor_sdk", "kimi", "reasonix", "dsh", "kiro", "antigravity", "qoder", "qoderclicn", "traecli", "grok", "qwen", "qwenpaw", "mcode".
 //
 // SupportedTypes is the canonical whitelist of agent types eligible to back a
 // custom runtime profile. It MUST stay in lockstep with the
@@ -355,8 +355,9 @@ type Config struct {
 // add deveco, migration 179 to add grok, migration 202 to add qwen,
 // migration 242 to add qoderclicn, migration 253 to add qwenpaw,
 // migration 254 to add reasonix, migration 313 to add dsh, migration 342 to
-// add mcode, migration 370 to add dim, migration 403 to add zeroclaw, and
-// migration 441 to add codearts): a custom runtime profile may
+// add mcode, migration 370 to add dim, migration 403 to add zeroclaw,
+// migration 441 to add codearts, and migration 502 to add cursor_sdk):
+// a custom runtime profile may
 // only be based on a backend Multica officially supports.
 // qoder and qoderclicn share the same ACP backend; keeping both provider keys
 // lets the daemon auto-detect and register the international and China-region
@@ -421,6 +422,7 @@ var resumeRejectionUndetectable = map[string]bool{
 	"antigravity": true,
 	"copilot":     true,
 	"cursor":      true,
+	"cursor_sdk":  true,
 	"deveco":      true,
 	"opencode":    true,
 	"codearts":    true,

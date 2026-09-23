@@ -1,6 +1,8 @@
 package daemon
 
 import (
+	"errors"
+	"fmt"
 	"os"
 	"os/exec"
 	"regexp"
@@ -9,6 +11,8 @@ import (
 
 	"github.com/multica-ai/multica/server/pkg/agent"
 )
+
+const cursorSdkSyntheticVersion = "0.0.0"
 
 var nodeVersionMajorRe = regexp.MustCompile(`v?(\d+)\.`)
 
@@ -44,4 +48,24 @@ func nodeMajorVersionAtLeast(nodePath string, minMajor int) bool {
 		return false
 	}
 	return major >= minMajor
+}
+
+func cursorSdkScriptPresent(path string) bool {
+	if strings.TrimSpace(path) == "" {
+		return false
+	}
+	info, err := os.Stat(path)
+	return err == nil && !info.IsDir()
+}
+
+// verifyCursorSdkAgentEntry checks that node and the executor script are usable.
+// The executor is launched as `node <script>` over JSONL and has no --version flag.
+func verifyCursorSdkAgentEntry(entry AgentEntry) (string, error) {
+	if strings.TrimSpace(entry.Command) == "" {
+		return "", errors.New("cursor sdk executor requires node on PATH")
+	}
+	if !cursorSdkScriptPresent(entry.Path) {
+		return "", fmt.Errorf("cursor sdk executor script not found at %s", entry.Path)
+	}
+	return cursorSdkSyntheticVersion, nil
 }

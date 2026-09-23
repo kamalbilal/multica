@@ -55,6 +55,24 @@ bash scripts/ensure-postgres.sh "$ENV_FILE"
 echo "==> Running migrations..."
 (cd server && go run ./cmd/migrate up)
 
+case "$(uname -s 2>/dev/null)" in
+  MINGW*|MSYS*|CYGWIN*)
+    executor_path="$(powershell -NoProfile -ExecutionPolicy Bypass -File scripts/ensure-cursor-sdk-executor.ps1 2>/dev/null | tr -d '\r' || true)"
+    ;;
+  *)
+    executor_path="$(bash scripts/ensure-cursor-sdk-executor.sh 2>/dev/null || true)"
+    ;;
+esac
+if [ -n "$executor_path" ] && [ -f "$executor_path" ]; then
+  export MULTICA_CURSOR_SDK_EXECUTOR="$executor_path"
+  if ! grep -q '^MULTICA_CURSOR_SDK_EXECUTOR=' "$ENV_FILE" 2>/dev/null; then
+    {
+      printf '\n# Cursor SDK provider (fork) — see fork/docs/cursor-sdk-selfhost.md\n'
+      printf 'MULTICA_CURSOR_SDK_EXECUTOR=%s\n' "$executor_path"
+    } >> "$ENV_FILE"
+  fi
+fi
+
 # ---------- Start services ----------
 echo ""
 echo "✓ Ready. Starting services..."

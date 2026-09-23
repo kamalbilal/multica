@@ -63,6 +63,8 @@ git log --oneline main..upstream/main
 | New shared TS packages       | `fork/packages/<name>/` and add to `pnpm-workspace.yaml` (document in `fork/patches/`) |
 | Backend / Go changes         | Prefer upstream PR; otherwise patch `server/` and save diff under `fork/patches/` |
 | Self-host config             | `.env` (never commit secrets); see `SELF_HOSTING.md` |
+| `cursor_sdk` provider        | `make cursor-sdk-executor`; see [fork/docs/cursor-sdk-selfhost.md](fork/docs/cursor-sdk-selfhost.md) |
+| Cursor SDK provider (`cursor_sdk`) | [fork/docs/cursor-sdk-selfhost.md](fork/docs/cursor-sdk-selfhost.md); upstream touch list in [fork/patches/cursor-sdk-provider.md](fork/patches/cursor-sdk-provider.md) |
 
 ## First-time development setup
 

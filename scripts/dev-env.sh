@@ -204,7 +204,25 @@ EOF
 # a function aborts the script under `set -e` when fn's last command fails, and
 # "no process is listening" is the normal answer here, not an error.
 port_listener_pid() {
-  lsof -nP -iTCP:"$1" -sTCP:LISTEN -t 2>/dev/null | head -1 || true
+  if command -v lsof >/dev/null 2>&1; then
+    lsof -nP -iTCP:"$1" -sTCP:LISTEN -t 2>/dev/null | head -1 || true
+    return 0
+  fi
+  case "$(uname -s 2>/dev/null)" in
+    MINGW*|MSYS*|CYGWIN*)
+      # Git Bash on Windows has no lsof; netstat returns the listening PID.
+      netstat -ano 2>/dev/null | awk -v port=":$1" '
+        toupper($0) ~ /LISTENING/ {
+          for (i = 1; i <= NF; i++) {
+            if ($i ~ port "$" || $i ~ ("\\]" port "$")) {
+              print $(NF)
+              exit
+            }
+          }
+        }
+      ' || true
+      ;;
+  esac
 }
 
 port_free() { [ -z "$(port_listener_pid "$1")" ]; }
@@ -315,6 +333,22 @@ load_env_file() {
   . "$root/scripts/local-env.sh"
 }
 
+# When reusing a registered environment, the manifest is loaded after .env and
+# can carry a stale DATABASE_URL (for example after changing POSTGRES_PORT).
+# Prefer the checkout's .env for database connection settings.
+sync_database_settings_from_env_file() {
+  local env_db_url env_db_name
+  env_db_url="$(grep -m1 '^DATABASE_URL=' "$REPO_ROOT/$ENV_FILE" 2>/dev/null | cut -d= -f2- | sed 's/\\?/?/g' || true)"
+  env_db_name="$(grep -m1 '^POSTGRES_DB=' "$REPO_ROOT/$ENV_FILE" 2>/dev/null | cut -d= -f2- || true)"
+  if [ -n "$env_db_url" ]; then
+    DATABASE_URL="$env_db_url"
+  fi
+  if [ -n "$env_db_name" ]; then
+    DB_NAME="$env_db_name"
+    POSTGRES_DB="$env_db_name"
+  fi
+}
+
 # The verification code has to be in the file BEFORE the backend starts: the
 # handler reads the variable at request time, but the process loads the file
 # once. Setting it here removes the start → edit → restart detour, and is what
@@ -332,6 +366,32 @@ ensure_dev_code() {
     printf '\nMULTICA_DEV_VERIFICATION_CODE=%s\n' "$DEV_CODE_DEFAULT" >> "$file"
   fi
   info "Set MULTICA_DEV_VERIFICATION_CODE=$DEV_CODE_DEFAULT in $1 (ignored when APP_ENV=production)."
+}
+
+ensure_cursor_sdk_executor() {
+  local env_file="$1" executor_path target tmp escaped
+  if is_windows_shell; then
+    executor_path="$(powershell -NoProfile -ExecutionPolicy Bypass -File "$REPO_ROOT/scripts/ensure-cursor-sdk-executor.ps1" 2>/dev/null | tr -d '\r' || true)"
+  else
+    executor_path="$(bash "$REPO_ROOT/scripts/ensure-cursor-sdk-executor.sh" 2>/dev/null || true)"
+  fi
+  [ -n "$executor_path" ] || return 0
+  [ -f "$executor_path" ] || return 0
+  export MULTICA_CURSOR_SDK_EXECUTOR="$executor_path"
+  target="$REPO_ROOT/$env_file"
+  [ -f "$target" ] || return 0
+  escaped="$(printf '%s' "$executor_path" | sed 's/[\\&|]/\\&/g')"
+  if grep -q '^MULTICA_CURSOR_SDK_EXECUTOR=' "$target" 2>/dev/null; then
+    tmp="$(mktemp)"
+    sed "s|^MULTICA_CURSOR_SDK_EXECUTOR=.*|MULTICA_CURSOR_SDK_EXECUTOR=${escaped}|" "$target" > "$tmp"
+    mv "$tmp" "$target"
+  else
+    {
+      printf '\n# Cursor SDK provider (fork) — see fork/docs/cursor-sdk-selfhost.md\n'
+      printf 'MULTICA_CURSOR_SDK_EXECUTOR=%s\n' "$executor_path"
+    } >> "$target"
+  fi
+  info "Set MULTICA_CURSOR_SDK_EXECUTOR for cursor_sdk provider."
 }
 
 rewrite_env_ports() {
@@ -477,12 +537,32 @@ checkout_commit() {
   git -C "${DIR:-$REPO_ROOT}" rev-parse --short HEAD 2>/dev/null || printf 'unknown'
 }
 
+is_windows_shell() {
+  case "$(uname -s 2>/dev/null)" in
+    MINGW*|MSYS*|CYGWIN*) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
+windows_process_parent_id() {
+  powershell -NoProfile -Command "(Get-CimInstance Win32_Process -Filter \"ProcessId=$1\").ParentProcessId" 2>/dev/null \
+    | tr -d '\r\n ' || true
+}
+
 process_group_id() {
   ps -p "$1" -o pgid= 2>/dev/null | tr -d ' ' || true
 }
 
 process_parent_id() {
-  ps -p "$1" -o ppid= 2>/dev/null | tr -d ' ' || true
+  local parent
+  parent="$(ps -p "$1" -o ppid= 2>/dev/null | tr -d ' ' || true)"
+  if [ -n "$parent" ]; then
+    printf '%s' "$parent"
+    return 0
+  fi
+  if is_windows_shell; then
+    windows_process_parent_id "$1"
+  fi
 }
 
 # Package runners may put a descendant in a nested process group (for example,
@@ -508,6 +588,10 @@ listener_pid_belongs_to_component() {
   [ -n "$launcher" ] && [ -n "$listener" ] || return 1
   recorded="$(cat "$(listener_pid_file "$component")" 2>/dev/null || true)"
   [ -n "$recorded" ] && [ "$listener" = "$recorded" ] && return 0
+  if is_windows_shell; then
+    process_is_descendant_of "$listener" "$launcher"
+    return $?
+  fi
   [ "$(process_group_id "$listener")" = "$launcher" ] && return 0
   process_is_descendant_of "$listener" "$launcher"
 }
@@ -524,17 +608,34 @@ listener_belongs_to_component() {
 record_component_listener() {
   local component=$1 port=$2 listener
   listener="$(port_listener_pid "$port")"
+  [ -n "$listener" ] || return 1
+  if is_windows_shell; then
+    printf '%s\n' "$listener" > "$(listener_pid_file "$component")"
+    printf '%s' "$listener"
+    return 0
+  fi
   listener_pid_belongs_to_component "$component" "$listener" || return 1
   printf '%s\n' "$listener" > "$(listener_pid_file "$component")"
   printf '%s' "$listener"
 }
 
 health_belongs_to_api() {
-  local health=$1 health_pid listener
+  local health=$1 health_pid listener launcher
   health_pid="$(json_field "$health" pid || true)"
   listener="$(port_listener_pid "$BACKEND_PORT")"
-  [ -n "$health_pid" ] && [ "$health_pid" = "$listener" ] \
-    && listener_belongs_to_component api "$BACKEND_PORT"
+  if [ -n "$health_pid" ] && [ -n "$listener" ] && [ "$health_pid" = "$listener" ]; then
+    listener_belongs_to_component api "$BACKEND_PORT" && return 0
+  fi
+  if is_windows_shell; then
+    launcher="$(component_pid api || true)"
+    [ -n "$health_pid" ] && [ -n "$launcher" ] || return 1
+    process_is_descendant_of "$health_pid" "$launcher" && return 0
+    # go run may bind the port in a process tree ps cannot walk; commit/started_at
+    # are verified immediately after this check.
+    [ -n "$listener" ] && [ "$health_pid" = "$listener" ]
+    return $?
+  fi
+  return 1
 }
 
 api_identity_matches() {
@@ -569,7 +670,7 @@ Run 'make down' here first — a leftover instance answers /health with 200 and 
   fi
 
   launched_at="$(now_epoch)"
-  launch_detached api make -C "$REPO_ROOT" -s api-dev ENV_FILE="$ENV_FILE"
+  launch_detached api make -C "$REPO_ROOT" -s api-dev ENV_FILE="$ENV_FILE" COMMIT="$expected_commit"
   info "api launching (pid $(cat "$(pid_file api)")), log: $(log_file api)"
 
   while [ "$waited" -lt 300 ]; do
@@ -1164,6 +1265,7 @@ Start the rest with 'make up C=api,web', or run 'make up C=daemon' from your own
     info "Created $ENV_FILE"
   fi
   ensure_dev_code "$ENV_FILE"
+  ensure_cursor_sdk_executor "$ENV_FILE"
   load_env_file "$ENV_FILE"
 
   acquire_lock
@@ -1177,6 +1279,8 @@ Start the rest with 'make up C=api,web', or run 'make up C=daemon' from your own
   if [ -n "$existing" ]; then
     load_manifest "$existing"
     NAME="$existing"
+    sync_database_settings_from_env_file
+    save_manifest
     bind_paths
     if [ "$lifecycle_requested" = 1 ]; then
       OWNER="$owner"

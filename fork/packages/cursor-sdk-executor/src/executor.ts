@@ -11,6 +11,7 @@ import type {
   ExecuteCommand,
   IpcCommand,
   ListModelsCommand,
+  MessagesListCommand,
   ReloadCommand,
   SteerCommand,
 } from "./protocol.js";
@@ -176,6 +177,27 @@ export async function handleReload(cmd: ReloadCommand, emit: EmitFn): Promise<vo
   }
 }
 
+export async function handleMessagesList(cmd: MessagesListCommand, emit: EmitFn): Promise<void> {
+  try {
+    const apiKey = resolveApiKey(cmd.apiKeyEnv);
+    if (!apiKey) {
+      emit({ event: "error", message: "missing CURSOR_API_KEY", retryable: false });
+      return;
+    }
+    const messages = await Agent.messages.list(cmd.agentId, {
+      runtime: "local",
+      cwd: cmd.cwd,
+    });
+    emit({ event: "messages", items: messages });
+  } catch (err) {
+    emit({
+      event: "error",
+      message: err instanceof Error ? err.message : String(err),
+      retryable: false,
+    });
+  }
+}
+
 export async function handleListModels(cmd: ListModelsCommand, emit: EmitFn): Promise<void> {
   try {
     const apiKey = resolveApiKey(cmd.apiKeyEnv);
@@ -217,6 +239,9 @@ export async function dispatchCommand(cmd: IpcCommand, emit: EmitFn): Promise<vo
       break;
     case "list-models":
       await handleListModels(cmd, emit);
+      break;
+    case "messages-list":
+      await handleMessagesList(cmd, emit);
       break;
     case "shutdown":
       await handleShutdown(emit);

@@ -131,6 +131,7 @@ You also need at least one AI agent CLI installed:
 - [Hermes](https://github.com/NousResearch/hermes) (`hermes` on PATH)
 - [Pi](https://pi.dev/) (`pi` on PATH)
 - [Cursor Agent](https://cursor.com/) (`cursor-agent` on PATH)
+- **Cursor (SDK)** — fork-only `cursor_sdk` provider via Node 22+ and the built executor; see [fork/docs/cursor-sdk-selfhost.md](fork/docs/cursor-sdk-selfhost.md) (coexists with `cursor-agent`)
 - Kimi (`kimi` on PATH)
 - [Reasonix](https://github.com/esengine/DeepSeek-Reasonix) (`reasonix` on PATH; run `reasonix setup` first)
 - Dim (`dim` on PATH)

@@ -44,13 +44,23 @@ export interface ListModelsCommand {
   apiKeyEnv?: string;
 }
 
+/** Go → Node: list stored messages for a local agent (resume backfill). */
+export interface MessagesListCommand {
+  cmd: "messages-list";
+  id: string;
+  agentId: string;
+  cwd: string;
+  apiKeyEnv?: string;
+}
+
 export type IpcCommand =
   | ExecuteCommand
   | SteerCommand
   | CancelCommand
   | ReloadCommand
   | ShutdownCommand
-  | ListModelsCommand;
+  | ListModelsCommand
+  | MessagesListCommand;
 
 export type IpcMessageEvent =
   | { event: "message"; type: "assistant"; content: string }
@@ -69,6 +79,12 @@ export interface IpcAgentIdEvent {
 /** Node → Go: model catalog from list-models. */
 export interface IpcModelsEvent {
   event: "models";
+  items: unknown[];
+}
+
+/** Node → Go: stored transcript from messages-list. */
+export interface IpcMessagesEvent {
+  event: "messages";
   items: unknown[];
 }
 
@@ -92,5 +108,6 @@ export type IpcEvent =
   | IpcAgentIdEvent
   | IpcMessageEvent
   | IpcModelsEvent
+  | IpcMessagesEvent
   | IpcErrorEvent
   | IpcResultEvent;

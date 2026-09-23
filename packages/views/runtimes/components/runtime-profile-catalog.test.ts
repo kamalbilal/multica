@@ -80,6 +80,10 @@ describe("runtimeTypeLabel", () => {
     expect(runtimeTypeLabel("claude")).toBe("claude");
   });
 
+  it("names cursor_sdk distinctly from the cursor-agent CLI provider", () => {
+    expect(runtimeTypeLabel("cursor_sdk")).toBe("Cursor (SDK)");
+  });
+
   // A target the client does not recognise still has to render as something.
   it("falls back to the raw value for an unknown target", () => {
     expect(runtimeTypeLabel("future-runtime")).toBe("future-runtime");
