@@ -407,6 +407,7 @@ export function ProviderLogo({
     case "copilot":
       return <CopilotLogo className={className} />;
     case "cursor":
+    case "cursor_sdk":
       return <CursorLogo className={className} />;
     case "kimi":
       return <KimiLogo className={className} />;

@@ -427,6 +427,12 @@ export function CreateAgentDialog({
               }}
             />
 
+            {selectedRuntime?.provider === "cursor_sdk" && (
+              <p className="text-caption text-muted-foreground">
+                Requires CURSOR_API_KEY on the runtime and Node 22+.
+              </p>
+            )}
+
             <ModelDropdown
               runtimeId={selectedRuntime?.id ?? null}
               runtimeOnline={selectedRuntime?.status === "online"}

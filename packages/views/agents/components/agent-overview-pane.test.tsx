@@ -193,6 +193,7 @@ describe("AgentOverviewPane MCP tab visibility", () => {
     ["Claude", "claude"],
     ["Codex", "codex"],
     ["Cursor", "cursor"],
+    ["Cursor (SDK)", "cursor_sdk"],
     ["Hermes", "hermes"],
     ["Kimi", "kimi"],
     ["Kiro", "kiro"],

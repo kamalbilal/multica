@@ -119,6 +119,7 @@ export const RUNTIME_PROFILE_PROTOCOL_FAMILIES = [
   "hermes",
   "pi",
   "cursor",
+  "cursor_sdk",
   "kimi",
   "reasonix",
   "dsh",
