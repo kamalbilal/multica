@@ -37,12 +37,20 @@ export interface ShutdownCommand {
   id: string;
 }
 
+/** Go → Node: list models available to the authenticated API key. */
+export interface ListModelsCommand {
+  cmd: "list-models";
+  id: string;
+  apiKeyEnv?: string;
+}
+
 export type IpcCommand =
   | ExecuteCommand
   | SteerCommand
   | CancelCommand
   | ReloadCommand
-  | ShutdownCommand;
+  | ShutdownCommand
+  | ListModelsCommand;
 
 export type IpcMessageEvent =
   | { event: "message"; type: "assistant"; content: string }
@@ -52,6 +60,25 @@ export type IpcMessageEvent =
   | { event: "message"; type: "status"; status: string }
   | { event: "message"; type: "usage"; usage: unknown };
 
+/** Node → Go: SDK agent id after create or resume. */
+export interface IpcAgentIdEvent {
+  event: "agent_id";
+  agentId: string;
+}
+
+/** Node → Go: model catalog from list-models. */
+export interface IpcModelsEvent {
+  event: "models";
+  items: unknown[];
+}
+
+/** Node → Go: non-terminal executor error. */
+export interface IpcErrorEvent {
+  event: "error";
+  message: string;
+  retryable: boolean;
+}
+
 /** Node → Go: terminal run outcome. */
 export interface IpcResultEvent {
   event: "result";
@@ -60,3 +87,10 @@ export interface IpcResultEvent {
   usage?: unknown;
   error?: string;
 }
+
+export type IpcEvent =
+  | IpcAgentIdEvent
+  | IpcMessageEvent
+  | IpcModelsEvent
+  | IpcErrorEvent
+  | IpcResultEvent;
