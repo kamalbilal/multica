@@ -236,6 +236,9 @@ var probeAgentCLIs = func() map[string]AgentEntry {
 	if e, ok := probe("MULTICA_CURSOR_PATH", "cursor-agent", "MULTICA_CURSOR_MODEL"); ok {
 		agents["cursor"] = e
 	}
+	if e, ok := probeCursorSdk(); ok {
+		agents["cursor_sdk"] = e
+	}
 	if e, ok := probe("MULTICA_COPILOT_PATH", "copilot", "MULTICA_COPILOT_MODEL"); ok {
 		agents["copilot"] = e
 	}

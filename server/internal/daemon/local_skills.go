@@ -170,7 +170,7 @@ func localSkillRootsForProvider(provider string) ([]localSkillRoot, bool, error)
 			providerRoot = filepath.Join(home, ".openclaw", "skills")
 		case "pi":
 			providerRoot = filepath.Join(home, ".pi", "agent", "skills")
-		case "cursor":
+		case "cursor", "cursor_sdk":
 			providerRoot = filepath.Join(home, ".cursor", "skills")
 		case "hermes":
 			providerRoot = hermesLocalSkillsRoot()

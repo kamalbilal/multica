@@ -7932,7 +7932,7 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 			}
 			effectiveMcpConfig = merged
 		}
-		if provider == "cursor" {
+		if execenv.IsCursorFamilyProvider(provider) {
 			cursorMcpAuthSource = strings.TrimSpace(task.Agent.CustomEnv[execenv.CursorMcpAuthSourceEnv])
 		}
 	}

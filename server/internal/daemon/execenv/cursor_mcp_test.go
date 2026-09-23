@@ -85,9 +85,16 @@ func TestCursorMcpApprovalKeyMatchesCursorAgentForRemoteServer(t *testing.T) {
 	}
 }
 
-func TestPrepareCursorMcpConfigWritesProjectConfigAndApprovals(t *testing.T) {
-	t.Parallel()
+func TestPrepareCursorFamilyMcpConfigWritesProjectConfigAndApprovals(t *testing.T) {
+	for _, provider := range []string{"cursor", "cursor_sdk"} {
+		t.Run(provider, func(t *testing.T) {
+			t.Parallel()
+			testPrepareCursorFamilyMcpConfigWritesProjectConfigAndApprovals(t, provider)
+		})
+	}
+}
 
+func testPrepareCursorFamilyMcpConfigWritesProjectConfigAndApprovals(t *testing.T, provider string) {
 	envRoot := t.TempDir()
 	workDir := filepath.Join(envRoot, "workdir")
 	if err := os.MkdirAll(workDir, 0o755); err != nil {
@@ -149,6 +156,28 @@ func TestPrepareCursorMcpConfigWritesProjectConfigAndApprovals(t *testing.T) {
 	}
 	if len(manifest.Files) == 0 {
 		t.Fatal("manifest did not record .cursor/mcp.json")
+	}
+
+	if provider == "cursor_sdk" {
+		workspacesRoot := t.TempDir()
+		env, err := Prepare(PrepareParams{
+			WorkspacesRoot: workspacesRoot,
+			WorkspaceID:    "ws-cursor-sdk-mcp",
+			TaskID:         "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee",
+			AgentName:      "Test Agent",
+			Provider:       provider,
+			McpConfig:      mcpConfig,
+			Task: TaskContextForEnv{
+				IssueID: "11111111-2222-3333-4444-555555555555",
+				AgentID: "99999999-8888-7777-6666-555555555555",
+			},
+		}, testLogger())
+		if err != nil {
+			t.Fatalf("Prepare(%s): %v", provider, err)
+		}
+		if env.CursorDataDir != filepath.Join(env.RootDir, "cursor-data") {
+			t.Fatalf("Prepare CursorDataDir = %q, want %q", env.CursorDataDir, filepath.Join(env.RootDir, "cursor-data"))
+		}
 	}
 }
 

@@ -378,8 +378,8 @@ func skillsDirPath(workDir, provider string) string {
 	case "pi":
 		// Pi natively discovers skills from .pi/skills/ in the workdir.
 		return filepath.Join(workDir, ".pi", "skills")
-	case "cursor":
-		// Cursor natively discovers skills from .cursor/skills/ in the workdir.
+	case "cursor", "cursor_sdk":
+		// Cursor and cursor_sdk discover skills from .cursor/skills/ in the workdir.
 		return filepath.Join(workDir, ".cursor", "skills")
 	case "kimi":
 		// Kimi Code CLI auto-discovers project-level skills from .kimi/skills/

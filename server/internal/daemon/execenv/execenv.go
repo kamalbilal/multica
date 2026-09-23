@@ -695,7 +695,7 @@ func Prepare(params PrepareParams, logger *slog.Logger) (*Environment, error) {
 	// still reads ~/.cursor/mcp.json, but only servers with approval entries in
 	// this per-task data dir can load, so user-global MCP servers do not leak
 	// into managed-MCP runs.
-	if params.Provider == "cursor" {
+	if IsCursorFamilyProvider(params.Provider) {
 		cursorDataDir, err := prepareCursorMcpConfig(envRoot, workDir, params.McpConfig, params.CursorMcpAuthSource, manifest)
 		if err != nil {
 			return nil, fmt.Errorf("execenv: prepare cursor mcp config: %w", err)
@@ -999,7 +999,7 @@ func Reuse(params ReuseParams, logger *slog.Logger) *Environment {
 	// Refresh Cursor's managed MCP sidecars on reuse. A newly saved agent
 	// mcp_config must replace the prior run's .cursor/mcp.json and isolated
 	// approvals before the next cursor-agent process starts.
-	if params.Provider == "cursor" && env.RootDir != "" {
+	if IsCursorFamilyProvider(params.Provider) && env.RootDir != "" {
 		cursorDataDir, err := prepareCursorMcpConfig(env.RootDir, params.WorkDir, params.McpConfig, params.CursorMcpAuthSource, manifest)
 		if err != nil {
 			logger.Warn("execenv: refresh cursor mcp config failed", "error", err)

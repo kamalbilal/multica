@@ -283,7 +283,7 @@ func loadRuntimeMcpServerConfigs(provider string) (map[string]any, bool, error) 
 			codexHome = filepath.Join(home, ".codex")
 		}
 		path, key, format = filepath.Join(codexHome, "config.toml"), "mcp_servers", "toml"
-	case "cursor":
+	case "cursor", "cursor_sdk":
 		path, key, format = filepath.Join(home, ".cursor", "mcp.json"), "mcpServers", "json"
 	case "opencode":
 		configHome := strings.TrimSpace(os.Getenv("XDG_CONFIG_HOME"))
@@ -417,7 +417,7 @@ func listRuntimeLocalMcpServers(provider string) ([]runtimeLocalMcpServerSummary
 			codexHome = filepath.Join(home, ".codex")
 		}
 		path, key, source, format = filepath.Join(codexHome, "config.toml"), "mcp_servers", "User config", "toml"
-	case "cursor":
+	case "cursor", "cursor_sdk":
 		path, key, source, format = filepath.Join(home, ".cursor", "mcp.json"), "mcpServers", "User config", "json"
 	case "opencode":
 		configHome := strings.TrimSpace(os.Getenv("XDG_CONFIG_HOME"))

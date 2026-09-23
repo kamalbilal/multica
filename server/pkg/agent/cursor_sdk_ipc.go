@@ -16,7 +16,14 @@ import (
 
 const cursorSdkExecutorEnv = "MULTICA_CURSOR_SDK_EXECUTOR"
 
-var defaultCursorSdkExecutorRelPath = filepath.Join("fork", "packages", "cursor-sdk-executor", "dist", "cli.js")
+// CursorSdkExecutorEnv overrides the bundled cursor-sdk executor script path.
+const CursorSdkExecutorEnv = cursorSdkExecutorEnv
+
+// DefaultCursorSdkExecutorRelPath is the bundled executor script relative to the
+// repository root when CursorSdkExecutorEnv is unset.
+var DefaultCursorSdkExecutorRelPath = filepath.Join("fork", "packages", "cursor-sdk-executor", "dist", "cli.js")
+
+var defaultCursorSdkExecutorRelPath = DefaultCursorSdkExecutorRelPath
 
 // CursorSdkClient communicates with the Node cursor-sdk executor over JSONL.
 type CursorSdkClient struct {
@@ -89,6 +96,11 @@ func NewCursorSdkClient(ctx context.Context, executorPath string, logger *slog.L
 
 	logger.Info("cursor sdk executor started", "pid", cmd.Process.Pid, "script", script)
 	return client, nil
+}
+
+// ResolveCursorSdkExecutor resolves the node binary and executor script path.
+func ResolveCursorSdkExecutor(executorPath string) (node string, script string, err error) {
+	return resolveCursorSdkExecutor(executorPath)
 }
 
 func resolveCursorSdkExecutor(executorPath string) (node string, script string, err error) {

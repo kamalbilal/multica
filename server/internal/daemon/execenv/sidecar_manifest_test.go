@@ -154,6 +154,7 @@ var allFileBasedProviders = []string{
 	"pi",
 	"omp",
 	"cursor",
+	"cursor_sdk",
 	"kimi",
 	"reasonix",
 	"dsh",
