@@ -1,0 +1,11 @@
+{
+  "name": "@multica-fork/cursor-sdk-executor",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=22"
+  },
+  "dependencies": {
+    "@cursor/sdk": "1.0.32"
+  }
+}
