@@ -27,6 +27,7 @@ Multica 不会替代你使用的 AI 编程工具。运行时会调用电脑上�
 | Codex | `codex` | ✓ | ✓ | `$CODEX_HOME/skills/` |
 | GitHub Copilot CLI | `copilot` | ✓ | — | `.github/skills/` |
 | Cursor Agent | `cursor-agent` | ✓ | ✓ | `.cursor/skills/` |
+| Cursor (SDK) | `cursor_sdk`（Node 22+） | ✓ | ✓ | `.cursor/skills/` |
 | DeepSeek Harness | `dsh` | ✓ | ✓ | `.dsh/skills/` |
 | DevEco Code | `deveco` | ✓ | — | `.deveco/skills/` |
 | Grok | `grok` | ✓ | ✓ | `.grok/skills/` |
@@ -45,6 +46,10 @@ Multica 不会替代你使用的 AI 编程工具。运行时会调用电脑上�
 | Reasonix | `reasonix` | ✓ | ✓ | `.reasonix/skills/` |
 | Trae CLI | `traecli` | ✓ | ✓ | `.traecli/skills/` |
 | Dim | `dim` | ✓ | ✓ | — |
+
+<Callout type="info">
+**Cursor (SDK)** 是本 fork 专用提供方（`cursor_sdk`），通过本地 `@cursor/sdk` 执行器运行，而非 `cursor-agent` CLI。它与 Cursor Agent 共用 MCP 与 `.cursor/skills/` 路径。配置说明见仓库根目录的 `fork/docs/cursor-sdk-selfhost.md`。
+</Callout>
 
 "Multica 管理 MCP" 表示你可以在智能体配置中填写 MCP server，由 Multica 在执行前传给对应工具。它不代表该工具本身没有其他 MCP 配置方式。
 

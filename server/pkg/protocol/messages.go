@@ -439,7 +439,8 @@ type DaemonHeartbeatPendingUpdate struct {
 // DaemonHeartbeatPendingModelList describes a request for the daemon to
 // enumerate the runtime's supported models.
 type DaemonHeartbeatPendingModelList struct {
-	ID string `json:"id"`
+	ID           string            `json:"id"`
+	DiscoveryEnv map[string]string `json:"discovery_env,omitempty"`
 }
 
 // DaemonHeartbeatPendingLocalSkills describes a request for the runtime's

@@ -24,7 +24,7 @@ func discoverCursorSdkModels(ctx context.Context, runtimeCmd Command) (Catalog, 
 	runCtx, cancel := context.WithTimeout(ctx, 15*time.Second)
 	defer cancel()
 
-	client, err := NewCursorSdkClient(runCtx, executorPath, nil, runtimeCmd.logger)
+	client, err := newCursorSdkClientForDiscovery(runCtx, executorPath, runtimeCmd)
 	if err != nil {
 		return Catalog{Models: cursorStaticModels(), Fallback: true}, nil
 	}
@@ -42,6 +42,14 @@ func discoverCursorSdkModels(ctx context.Context, runtimeCmd Command) (Catalog, 
 		return Catalog{Models: cursorStaticModels(), Fallback: true}, nil
 	}
 	return Catalog{Models: models}, nil
+}
+
+func newCursorSdkClientForDiscovery(ctx context.Context, executorPath string, runtimeCmd Command) (*CursorSdkClient, error) {
+	node, script, err := resolveCursorSdkExecutor(executorPath, runtimeCmd.Launcher)
+	if err != nil {
+		return nil, err
+	}
+	return newCursorSdkClientWithResolvedPaths(ctx, node, script, runtimeCmd.DiscoveryEnv, runtimeCmd.logger)
 }
 
 func parseCursorSdkModels(items []json.RawMessage) []Model {

@@ -39,7 +39,17 @@ export MULTICA_CURSOR_SDK_EXECUTOR=/absolute/path/to/fork/packages/cursor-sdk-ex
 2. Set `CURSOR_API_KEY` in the daemon environment **or** add it to the agent's custom env in the UI.
 3. Restart the daemon so the probe can discover `cursor_sdk`.
 
+When the key lives only in agent custom env, refresh the model list on the agent
+page so discovery forwards that key to the executor (daemon-level keys apply
+automatically).
+
 The daemon probe requires Node 22+ and a readable executor script. When both are present, `cursor_sdk` appears alongside other discovered agents.
+
+## Known parity gaps vs `cursor-agent`
+
+- Background shell interrupt (`InterruptBackgroundTools`) is not wired for
+  `cursor_sdk` yet. Long-running shell tools without steady heartbeats may hit
+  the idle watchdog sooner than on the CLI provider.
 
 ## Create a `cursor_sdk` agent
 

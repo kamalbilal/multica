@@ -5,7 +5,9 @@ import (
 	"context"
 	"errors"
 	"log/slog"
+	"maps"
 	"os/exec"
+	"slices"
 	"strings"
 	"syscall"
 	"time"
@@ -76,6 +78,13 @@ type Command struct {
 	// by FilterLaunchPrefix. Never mutate a Command's Prefix in place; Argv
 	// copies it precisely so a caller cannot alias it.
 	Prefix []string
+	// Launcher is the executable that runs Path when Path is a script rather
+	// than a binary (cursor_sdk's Node executor). Empty means Path is invoked
+	// directly.
+	Launcher string
+	// DiscoveryEnv is merged into the subprocess environment for model
+	// discovery only. Values override inherited OS env for those keys.
+	DiscoveryEnv map[string]string
 	// logger reports prefix/argument conflicts at the moment a process is
 	// built. Optional: a zero Command logs nothing.
 	logger *slog.Logger
@@ -90,6 +99,23 @@ type Command struct {
 // one-shot `--version` probe.
 func NewCommand(path string, prefix []string) Command {
 	return Command{Path: path, Prefix: append([]string(nil), prefix...)}
+}
+
+// WithLauncher returns a copy whose Launcher field is set.
+func (c Command) WithLauncher(launcher string) Command {
+	out := c
+	out.Launcher = strings.TrimSpace(launcher)
+	return out
+}
+
+// WithDiscoveryEnv returns a copy whose DiscoveryEnv field is set.
+func (c Command) WithDiscoveryEnv(env map[string]string) Command {
+	if len(env) == 0 {
+		return c
+	}
+	out := c
+	out.DiscoveryEnv = maps.Clone(env)
+	return out
 }
 
 // Argv returns the full argument vector for one invocation: the command's own
@@ -292,10 +318,24 @@ func (c Command) withFilteredPrefix(fn func([]string) []string) Command {
 // executable with different models behind it, and keying on the path alone
 // would serve the first one's catalog to the second (see discoveryCacheKey).
 func (c Command) cacheKey() string {
-	if len(c.Prefix) == 0 {
-		return c.Path
+	base := c.Path
+	if len(c.Prefix) > 0 {
+		base += "\x00" + strings.Join(c.Prefix, "\x00")
 	}
-	return c.Path + "\x00" + strings.Join(c.Prefix, "\x00")
+	if c.Launcher != "" {
+		base += "\x00launcher:" + c.Launcher
+	}
+	if len(c.DiscoveryEnv) > 0 {
+		keys := make([]string, 0, len(c.DiscoveryEnv))
+		for k := range c.DiscoveryEnv {
+			keys = append(keys, k)
+		}
+		slices.Sort(keys)
+		for _, k := range keys {
+			base += "\x00" + k + "=" + c.DiscoveryEnv[k]
+		}
+	}
+	return base
 }
 
 // String renders the command the way a user wrote it in the Runtimes UI, for

@@ -47,6 +47,14 @@ Fork-only Node executor lives under `fork/packages/cursor-sdk-executor/`. Every 
 | `fork/packages/cursor-sdk-executor/src/ipc-stdout-guard.ts` | Redirect non-IPC stdout to stderr (SDK logs break JSONL) |
 | `fork/packages/cursor-sdk-executor/src/ipc-stdout-guard.test.ts` | Stdout guard tests |
 | `fork/packages/cursor-sdk-executor/src/cli.ts` | Import stdout guard before SDK init |
+| `server/internal/handler/runtime_models.go` | Optional `discovery_env` on model-list requests (`CURSOR_API_KEY`) |
+| `server/internal/handler/runtime_models_redis_store.go` | Persist `discovery_env` in Redis envelope |
+| `server/internal/handler/daemon.go` | Forward `discovery_env` to daemon heartbeat |
+| `server/pkg/protocol/messages.go` | `DaemonHeartbeatPendingModelList.discovery_env` |
+| `server/pkg/agent/launch.go` | `Command.Launcher` + `Command.DiscoveryEnv` for discovery |
+| `packages/core/runtimes/models.ts` | `cursorSdkModelDiscoveryEnv` + query key for agent keys |
+| `packages/core/api/client.ts` | POST `discovery_env` on `initiateListModels` |
+| `packages/views/agents/components/agent-detail-inspector.tsx` | Forward agent `CURSOR_API_KEY` to model discovery |
 | `packages/views/runtimes/utils.ts` | `cursor_sdk` pricing alias to `cursor/*` rows |
 | `packages/views/runtimes/utils.test.ts` | `cursor_sdk` pricing parity test |
 | `packages/views/runtimes/components/runtime-profile-catalog.test.ts` | `runtimeTypeLabel("cursor_sdk")` |
@@ -66,3 +74,4 @@ Fork-only Node executor lives under `fork/packages/cursor-sdk-executor/`. Every 
 2. Re-apply conflicts using this manifest and `fork/docs/cursor-sdk-selfhost.md`.
 3. Rebuild the executor: `cd fork/packages/cursor-sdk-executor && npm ci && npm run build`.
 4. Run `cd server && go test ./pkg/agent -run CursorSdk -v` and frontend runtime-profile tests.
+5. Optional CI for the executor: `cd fork/packages/cursor-sdk-executor && npm ci && npm test && npm run build`.

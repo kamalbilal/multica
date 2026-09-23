@@ -1,5 +1,4 @@
-# Fork dev Postgres — isolated from an existing Multica install (project name + port).
-name: multica-fork
+name: multica
 
 services:
   postgres:
@@ -9,7 +8,7 @@ services:
       POSTGRES_USER: ${POSTGRES_USER:-multica}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-multica}
     ports:
-      - "127.0.0.1:5433:5432"
+      - "127.0.0.1:5432:5432"
     volumes:
       - pgdata:/var/lib/postgresql/data
 

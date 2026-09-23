@@ -53,13 +53,16 @@ type CursorSdkClient struct {
 
 // NewCursorSdkClient spawns the Node executor and starts its stdout reader.
 func NewCursorSdkClient(ctx context.Context, executorPath string, env map[string]string, logger *slog.Logger) (*CursorSdkClient, error) {
-	if logger == nil {
-		logger = slog.Default()
-	}
-
-	node, script, err := resolveCursorSdkExecutor(executorPath)
+	node, script, err := resolveCursorSdkExecutor(executorPath, "")
 	if err != nil {
 		return nil, err
+	}
+	return newCursorSdkClientWithResolvedPaths(ctx, node, script, env, logger)
+}
+
+func newCursorSdkClientWithResolvedPaths(ctx context.Context, node, script string, env map[string]string, logger *slog.Logger) (*CursorSdkClient, error) {
+	if logger == nil {
+		logger = slog.Default()
 	}
 
 	runCtx, cancel := context.WithCancel(ctx)
@@ -105,18 +108,21 @@ func NewCursorSdkClient(ctx context.Context, executorPath string, env map[string
 
 // ResolveCursorSdkExecutor resolves the node binary and executor script path.
 func ResolveCursorSdkExecutor(executorPath string) (node string, script string, err error) {
-	return resolveCursorSdkExecutor(executorPath)
+	return resolveCursorSdkExecutor(executorPath, "")
 }
 
-func resolveCursorSdkExecutor(executorPath string) (node string, script string, err error) {
+func resolveCursorSdkExecutor(executorPath, nodeOverride string) (node string, script string, err error) {
 	script, err = locateCursorSdkExecutorScript(executorPath)
 	if err != nil {
 		return "", "", err
 	}
 
-	node, err = exec.LookPath("node")
-	if err != nil {
-		return "", "", fmt.Errorf("cursor sdk executor requires node on PATH: %w", err)
+	node = strings.TrimSpace(nodeOverride)
+	if node == "" {
+		node, err = exec.LookPath("node")
+		if err != nil {
+			return "", "", fmt.Errorf("cursor sdk executor requires node on PATH: %w", err)
+		}
 	}
 
 	return node, script, nil

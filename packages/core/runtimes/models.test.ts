@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { QueryClient, QueryObserver } from "@tanstack/react-query";
 import {
   LIVE_MODELS_STALE_TIME_MS,
+  cursorSdkModelDiscoveryEnv,
   resolveRuntimeModels,
   refreshRuntimeModels,
   runtimeModelsKeys,
@@ -273,11 +274,35 @@ describe("staleTimeFor", () => {
   });
 });
 
+describe("cursorSdkModelDiscoveryEnv", () => {
+  it("forwards CURSOR_API_KEY from agent custom env", () => {
+    expect(
+      cursorSdkModelDiscoveryEnv({ CURSOR_API_KEY: " agent-key " }),
+    ).toEqual({ CURSOR_API_KEY: "agent-key" });
+  });
+
+  it("returns undefined when the key is absent", () => {
+    expect(cursorSdkModelDiscoveryEnv({})).toBeUndefined();
+  });
+});
+
 describe("runtimeModelsOptions", () => {
+  it("scopes the query key when agent auth is forwarded", () => {
+    const options = runtimeModelsOptions("rt-1", {
+      CURSOR_API_KEY: "agent-key",
+    });
+    expect(options.queryKey).toEqual([
+      "runtimes",
+      "models",
+      "rt-1",
+      "agent-cursor-key",
+    ]);
+  });
+
   it("keeps unused entries long enough to render instantly on return", () => {
     const options = runtimeModelsOptions("rt-1");
     expect(options.gcTime).toBeGreaterThanOrEqual(LIVE_MODELS_STALE_TIME_MS);
-    expect(options.queryKey).toEqual(["runtimes", "models", "rt-1"]);
+    expect(options.queryKey).toEqual(["runtimes", "models", "rt-1", "inherit"]);
     expect(options.enabled).toBe(true);
   });
 

@@ -27,6 +27,7 @@ Les étapes d'installation se trouvent dans [Installer les outils de codage IA](
 | Codex | `codex` | ✓ | ✓ | `$CODEX_HOME/skills/` |
 | GitHub Copilot CLI | `copilot` | ✓ | — | `.github/skills/` |
 | Cursor Agent | `cursor-agent` | ✓ | ✓ | `.cursor/skills/` |
+| Cursor (SDK) | `cursor_sdk` (Node 22+) | ✓ | ✓ | `.cursor/skills/` |
 | DeepSeek Harness | `dsh` | ✓ | ✓ | `.dsh/skills/` |
 | DevEco Code | `deveco` | ✓ | — | `.deveco/skills/` |
 | Grok | `grok` | ✓ | ✓ | `.grok/skills/` |
@@ -45,6 +46,10 @@ Les étapes d'installation se trouvent dans [Installer les outils de codage IA](
 | Reasonix | `reasonix` | ✓ | ✓ | `.reasonix/skills/` |
 | Trae CLI | `traecli` | ✓ | ✓ | `.traecli/skills/` |
 | Dim | `dim` | ✓ | ✓ | — |
+
+<Callout type="info">
+**Cursor (SDK)** est un fournisseur propre à ce fork (`cursor_sdk`) qui exécute l'exécuteur local `@cursor/sdk` au lieu du CLI `cursor-agent`. Il partage les chemins MCP et `.cursor/skills/` avec Cursor Agent. La configuration est documentée dans `fork/docs/cursor-sdk-selfhost.md` à la racine du dépôt.
+</Callout>
 
 « MCP géré par Multica » signifie que vous pouvez définir des serveurs MCP dans la configuration de l'agent et que Multica les transmet à l'outil avant une exécution. Cela ne signifie pas que l'outil n'a pas d'autre moyen de configurer MCP.
 

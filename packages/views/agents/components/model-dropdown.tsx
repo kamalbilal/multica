@@ -38,12 +38,14 @@ export function ModelDropdown({
   value,
   onChange,
   disabled,
+  discoveryEnv,
 }: {
   runtimeId: string | null;
   runtimeOnline: boolean;
   value: string;
   onChange: (value: string) => void;
   disabled?: boolean;
+  discoveryEnv?: Record<string, string>;
 }) {
   const { t } = useT("agents");
   const queryClient = useQueryClient();
@@ -51,7 +53,7 @@ export function ModelDropdown({
   const [search, setSearch] = useState("");
 
   const modelsQuery = useQuery(
-    runtimeModelsOptions(runtimeOnline ? runtimeId : null),
+    runtimeModelsOptions(runtimeOnline ? runtimeId : null, discoveryEnv),
   );
 
   const supported = modelsQuery.data?.supported ?? true;
@@ -113,7 +115,7 @@ export function ModelDropdown({
 
   const refresh = () => {
     if (!runtimeId || !runtimeOnline) return;
-    void refreshRuntimeModels(queryClient, runtimeId).catch(() => {
+    void refreshRuntimeModels(queryClient, runtimeId, discoveryEnv).catch(() => {
       // React Query owns the error state rendered below. Swallow the returned
       // promise rejection so a failed manual refresh is not also unhandled.
     });

@@ -2184,6 +2184,19 @@ describe("ApiClient model discovery response schema", () => {
     expect(vi.mocked(fetch).mock.calls[0]?.[1]).toMatchObject({ method: "POST" });
   });
 
+  it("forwards discovery_env for cursor_sdk model discovery", async () => {
+    stubJSON(completed);
+
+    await new ApiClient("https://api.example.test").initiateListModels("rt-1", {
+      discoveryEnv: { CURSOR_API_KEY: "agent-key" },
+    });
+
+    expect(vi.mocked(fetch).mock.calls[0]?.[1]).toMatchObject({
+      method: "POST",
+      body: JSON.stringify({ discovery_env: { CURSOR_API_KEY: "agent-key" } }),
+    });
+  });
+
   // The picker drives a state machine off `status`, so a malformed body must
   // become an explicit failure — not a fabricated empty catalog, and not an
   // endless "discovering models" spinner.

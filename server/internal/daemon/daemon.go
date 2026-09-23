@@ -4617,7 +4617,7 @@ func (d *Daemon) handleHeartbeatActions(ctx context.Context, runtimeID string, r
 	}
 	if resp.PendingModelList != nil {
 		if rt := d.findRuntime(runtimeID); rt != nil {
-			go d.handleModelList(ctx, *rt, resp.PendingModelList.ID)
+			go d.handleModelList(ctx, *rt, resp.PendingModelList.ID, resp.PendingModelList.DiscoveryEnv)
 		}
 	}
 	if resp.PendingLocalSkills != nil {
@@ -4744,7 +4744,7 @@ func (d *Daemon) handlePendingWorkHint(runtimeID, kind string) {
 // error, and it is forwarded as status=failed so the picker can show the reason
 // and keep manual entry (MUL-6606). Both outcomes leave the creatable dropdown
 // usable; only the second one tells the user why it is empty.
-func (d *Daemon) handleModelList(ctx context.Context, rt Runtime, requestID string) {
+func (d *Daemon) handleModelList(ctx context.Context, rt Runtime, requestID string, discoveryEnv map[string]string) {
 	d.logger.Info("model list requested", "runtime_id", rt.ID, "request_id", requestID, "provider", rt.Provider)
 
 	// Discovery must enumerate the binary this runtime will actually execute,
@@ -4779,7 +4779,14 @@ func (d *Daemon) handleModelList(ctx context.Context, rt Runtime, requestID stri
 		return
 	}
 
-	catalog, err := listModels(ctx, rt.Provider, agent.NewCommand(execPath, fixedArgs))
+	runtimeCmd := agent.NewCommand(execPath, fixedArgs)
+	if rt.Provider == "cursor_sdk" {
+		if entry, ok := d.agents()[rt.Provider]; ok {
+			runtimeCmd = runtimeCmd.WithLauncher(entry.Command)
+		}
+		runtimeCmd = runtimeCmd.WithDiscoveryEnv(discoveryEnv)
+	}
+	catalog, err := listModels(ctx, rt.Provider, runtimeCmd)
 	if err != nil {
 		d.reportModelListResult(ctx, rt, requestID, map[string]any{
 			"status": "failed",

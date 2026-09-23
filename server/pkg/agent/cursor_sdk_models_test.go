@@ -50,6 +50,50 @@ func TestDiscoverCursorSdkModels(t *testing.T) {
 	}
 }
 
+func TestDiscoverCursorSdkModelsUsesDiscoveryEnv(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	script := filepath.Join(dir, "env-discovery-executor.js")
+	const envScript = `
+const readline = require("node:readline");
+const rl = readline.createInterface({ input: process.stdin, crlfDelay: Infinity });
+rl.on("line", (line) => {
+  const cmd = JSON.parse(line.trim());
+  switch (cmd.cmd) {
+    case "list-models":
+      process.stdout.write(JSON.stringify({
+        event: "models",
+        items: [{ id: process.env.CURSOR_API_KEY || "missing" }],
+      }) + "\n");
+      break;
+    case "shutdown":
+      rl.close();
+      process.exit(0);
+  }
+});
+`
+	if err := os.WriteFile(script, []byte(envScript), 0o644); err != nil {
+		t.Fatalf("write executor: %v", err)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	catalog, err := discoverCursorSdkModels(ctx, NewCommand(script, nil).WithDiscoveryEnv(map[string]string{
+		"CURSOR_API_KEY": "from-agent-env",
+	}))
+	if err != nil {
+		t.Fatalf("discoverCursorSdkModels: %v", err)
+	}
+	if catalog.Fallback {
+		t.Fatalf("expected live catalog, got fallback")
+	}
+	if len(catalog.Models) != 1 || catalog.Models[0].ID != "from-agent-env" {
+		t.Fatalf("unexpected models: %#v", catalog.Models)
+	}
+}
+
 func TestDiscoverCursorSdkModelsMissingExecutorFallsBack(t *testing.T) {
 	t.Parallel()
 

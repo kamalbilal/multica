@@ -429,7 +429,8 @@ export function CreateAgentDialog({
 
             {selectedRuntime?.provider === "cursor_sdk" && (
               <p className="text-caption text-muted-foreground">
-                Requires CURSOR_API_KEY on the runtime and Node 22+.
+                Requires Node 22+ and CURSOR_API_KEY on the daemon host (or in
+                agent custom env after create for live model discovery).
               </p>
             )}
 

@@ -3,8 +3,10 @@ package handler
 import (
 	"context"
 	"encoding/json"
+	"io"
 	"log/slog"
 	"net/http"
+	"strings"
 	"sync"
 	"time"
 
@@ -69,6 +71,9 @@ type ModelListRequest struct {
 	CreatedAt         time.Time               `json:"created_at"`
 	UpdatedAt         time.Time               `json:"updated_at"`
 	RunStartedAt      *time.Time              `json:"-"`
+	// DiscoveryEnv carries provider-specific auth for live model discovery
+	// (cursor_sdk agent custom_env). Never returned to API clients.
+	DiscoveryEnv map[string]string `json:"-"`
 	// Cached marks a response answered from the server-side catalog cache
 	// instead of a live daemon round trip (MUL-5444). Purely informational —
 	// Status is already "completed" and Models is already populated, so a client
@@ -170,7 +175,7 @@ const (
 // implementation can honour the heartbeat-side timeout that gates a
 // slow shared store from stalling the rest of the heartbeat.
 type ModelListStore interface {
-	Create(ctx context.Context, runtimeID string) (*ModelListRequest, error)
+	Create(ctx context.Context, runtimeID string, discoveryEnv map[string]string) (*ModelListRequest, error)
 	Get(ctx context.Context, id string) (*ModelListRequest, error)
 	// HasPending is a cheap read-only probe used by the heartbeat hot path
 	// to gate the side-effecting PopPending. A spurious "true" is fine —
@@ -220,7 +225,21 @@ func NewInMemoryModelListStore() *InMemoryModelListStore {
 	return &InMemoryModelListStore{requests: make(map[string]*ModelListRequest)}
 }
 
-func (s *InMemoryModelListStore) Create(_ context.Context, runtimeID string) (*ModelListRequest, error) {
+func sanitizeModelDiscoveryEnv(provider string, env map[string]string) map[string]string {
+	if provider != "cursor_sdk" || len(env) == 0 {
+		return nil
+	}
+	out := map[string]string{}
+	if v := strings.TrimSpace(env["CURSOR_API_KEY"]); v != "" {
+		out["CURSOR_API_KEY"] = v
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
+}
+
+func (s *InMemoryModelListStore) Create(_ context.Context, runtimeID string, discoveryEnv map[string]string) (*ModelListRequest, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -233,9 +252,10 @@ func (s *InMemoryModelListStore) Create(_ context.Context, runtimeID string) (*M
 
 	now := time.Now()
 	req := &ModelListRequest{
-		ID:        randomID(),
-		RuntimeID: runtimeID,
-		Status:    ModelListPending,
+		ID:           randomID(),
+		RuntimeID:    runtimeID,
+		Status:       ModelListPending,
+		DiscoveryEnv: discoveryEnv,
 		// Default to true; the daemon overrides this in the report
 		// for providers that don't support per-agent model selection.
 		Supported: true,
@@ -381,7 +401,21 @@ func (h *Handler) InitiateListModels(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	req, err := h.ModelListStore.Create(r.Context(), resolvedRuntimeID)
+	var body struct {
+		DiscoveryEnv map[string]string `json:"discovery_env"`
+	}
+	if r.Body != nil && r.ContentLength != 0 {
+		if err := json.NewDecoder(io.LimitReader(r.Body, 16<<10)).Decode(&body); err != nil {
+			writeError(w, http.StatusBadRequest, "invalid model list request body")
+			return
+		}
+	}
+
+	req, err := h.ModelListStore.Create(
+		r.Context(),
+		resolvedRuntimeID,
+		sanitizeModelDiscoveryEnv(rt.Provider, body.DiscoveryEnv),
+	)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to enqueue model list request: "+err.Error())
 		return
@@ -431,7 +465,7 @@ func (h *Handler) revalidateModelCatalog(ctx context.Context, runtimeID string) 
 	if pending {
 		return
 	}
-	if _, err := h.ModelListStore.Create(ctx, runtimeID); err != nil {
+	if _, err := h.ModelListStore.Create(ctx, runtimeID, nil); err != nil {
 		slog.Debug("model catalog revalidate enqueue failed", "error", err, "runtime_id", runtimeID)
 		return
 	}

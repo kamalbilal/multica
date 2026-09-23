@@ -2,10 +2,27 @@ import { queryOptions, type QueryClient } from "@tanstack/react-query";
 import { api } from "../api";
 import type { RuntimeModelsResult } from "../types/agent";
 
+/** Auth env forwarded for cursor_sdk live model discovery (agent custom_env). */
+export function cursorSdkModelDiscoveryEnv(
+  customEnv?: Record<string, string> | null,
+): Record<string, string> | undefined {
+  const apiKey = customEnv?.CURSOR_API_KEY?.trim();
+  if (!apiKey) return undefined;
+  return { CURSOR_API_KEY: apiKey };
+}
+
+function modelListDiscoveryKey(env?: Record<string, string>): string {
+  return env?.CURSOR_API_KEY ? "agent-cursor-key" : "inherit";
+}
+
 export const runtimeModelsKeys = {
   all: () => ["runtimes", "models"] as const,
-  forRuntime: (runtimeId: string) =>
-    [...runtimeModelsKeys.all(), runtimeId] as const,
+  forRuntime: (runtimeId: string, discoveryEnv?: Record<string, string>) =>
+    [
+      ...runtimeModelsKeys.all(),
+      runtimeId,
+      modelListDiscoveryKey(discoveryEnv),
+    ] as const,
 };
 
 const POLL_INTERVAL_MS = 500;
@@ -67,12 +84,12 @@ export const MODELS_GC_TIME_MS = 30 * 60_000;
 // window past what the server itself promises.
 export async function resolveRuntimeModels(
   runtimeId: string,
-  options: { force?: boolean } = {},
+  options: {
+    force?: boolean;
+    discoveryEnv?: Record<string, string>;
+  } = {},
 ): Promise<RuntimeModelsResult> {
-  const initial =
-    options.force === true
-      ? await api.initiateListModels(runtimeId, { force: true })
-      : await api.initiateListModels(runtimeId);
+  const initial = await api.initiateListModels(runtimeId, options);
   const start = Date.now();
   let current = initial;
   while (current.status === "pending" || current.status === "running") {
@@ -119,12 +136,16 @@ export function staleTimeFor(data: RuntimeModelsResult | undefined): number {
   return data.cached ? 0 : LIVE_MODELS_STALE_TIME_MS;
 }
 
-export function runtimeModelsOptions(runtimeId: string | null | undefined) {
+export function runtimeModelsOptions(
+  runtimeId: string | null | undefined,
+  discoveryEnv?: Record<string, string>,
+) {
   return queryOptions({
     queryKey: runtimeId
-      ? runtimeModelsKeys.forRuntime(runtimeId)
+      ? runtimeModelsKeys.forRuntime(runtimeId, discoveryEnv)
       : runtimeModelsKeys.all(),
-    queryFn: () => resolveRuntimeModels(runtimeId as string),
+    queryFn: () =>
+      resolveRuntimeModels(runtimeId as string, { discoveryEnv }),
     enabled: Boolean(runtimeId),
     staleTime: (query) => staleTimeFor(query.state.data),
     gcTime: MODELS_GC_TIME_MS,
@@ -139,10 +160,12 @@ export function runtimeModelsOptions(runtimeId: string | null | undefined) {
 export function refreshRuntimeModels(
   queryClient: QueryClient,
   runtimeId: string,
+  discoveryEnv?: Record<string, string>,
 ): Promise<RuntimeModelsResult> {
   return queryClient.fetchQuery({
-    ...runtimeModelsOptions(runtimeId),
-    queryFn: () => resolveRuntimeModels(runtimeId, { force: true }),
+    ...runtimeModelsOptions(runtimeId, discoveryEnv),
+    queryFn: () =>
+      resolveRuntimeModels(runtimeId, { force: true, discoveryEnv }),
     staleTime: 0,
   });
 }

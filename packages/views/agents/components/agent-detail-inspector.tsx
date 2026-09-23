@@ -13,6 +13,7 @@ import {
   AGENT_MAX_CONCURRENT_TASKS_MIN,
 } from "@multica/core/agents";
 import {
+  cursorSdkModelDiscoveryEnv,
   isRuntimeUsableForUser,
   runtimeModelsOptions,
 } from "@multica/core/runtimes";
@@ -122,12 +123,22 @@ export function AgentDetailInspector({
     runtime != null && isRuntimeUsableForUser(runtime, currentUserId);
   const canDiscoverRuntimeModels = isOnline && canReadRuntime;
   const nameInvalid = name.trim().length === 0;
+  const modelDiscoveryEnv = useMemo(
+    () =>
+      runtime?.provider === "cursor_sdk"
+        ? cursorSdkModelDiscoveryEnv(agent.custom_env)
+        : undefined,
+    [agent.custom_env, runtime?.provider],
+  );
 
   // Same query the Thinking / Speed fields already use, so switching model
   // costs no extra request. `null` = not authoritative (offline runtime, still
   // loading, or discovery failed) and must not trigger any clearing.
   const modelsQuery = useQuery(
-    runtimeModelsOptions(canDiscoverRuntimeModels ? agent.runtime_id : null),
+    runtimeModelsOptions(
+      canDiscoverRuntimeModels ? agent.runtime_id : null,
+      modelDiscoveryEnv,
+    ),
   );
   const modelCatalog = useMemo<ModelCatalog>(
     () =>
@@ -273,6 +284,7 @@ export function AgentDetailInspector({
               showLabel={false}
               runtimeId={agent.runtime_id}
               runtimeOnline={canDiscoverRuntimeModels}
+              discoveryEnv={modelDiscoveryEnv}
               value={agent.model ?? ""}
               canEdit={canEdit}
               onChange={handleModelChange}

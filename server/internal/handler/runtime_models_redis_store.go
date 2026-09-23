@@ -49,15 +49,16 @@ func NewRedisModelListStore(rdb redis.UniversalClient) *RedisModelListStore {
 	return &RedisModelListStore{rdb: rdb}
 }
 
-func (s *RedisModelListStore) Create(ctx context.Context, runtimeID string) (*ModelListRequest, error) {
+func (s *RedisModelListStore) Create(ctx context.Context, runtimeID string, discoveryEnv map[string]string) (*ModelListRequest, error) {
 	now := time.Now()
 	req := &ModelListRequest{
-		ID:        randomID(),
-		RuntimeID: runtimeID,
-		Status:    ModelListPending,
-		Supported: true,
-		CreatedAt: now,
-		UpdatedAt: now,
+		ID:           randomID(),
+		RuntimeID:    runtimeID,
+		Status:       ModelListPending,
+		DiscoveryEnv: discoveryEnv,
+		Supported:    true,
+		CreatedAt:    now,
+		UpdatedAt:    now,
 	}
 	data, err := s.marshalRequest(req)
 	if err != nil {
@@ -138,10 +139,15 @@ func (s *RedisModelListStore) persistRequest(ctx context.Context, req *ModelList
 type redisModelListEnvelope struct {
 	Public       *ModelListRequest `json:"r"`
 	RunStartedAt *time.Time        `json:"s,omitempty"`
+	DiscoveryEnv map[string]string `json:"e,omitempty"`
 }
 
 func (s *RedisModelListStore) marshalRequest(req *ModelListRequest) ([]byte, error) {
-	env := redisModelListEnvelope{Public: req, RunStartedAt: req.RunStartedAt}
+	env := redisModelListEnvelope{
+		Public:       req,
+		RunStartedAt: req.RunStartedAt,
+		DiscoveryEnv: req.DiscoveryEnv,
+	}
 	data, err := json.Marshal(env)
 	if err != nil {
 		return nil, fmt.Errorf("marshal model list request: %w", err)
@@ -158,6 +164,7 @@ func (s *RedisModelListStore) unmarshalRequest(raw []byte) (*ModelListRequest, e
 		return nil, fmt.Errorf("decode model list request: missing payload")
 	}
 	env.Public.RunStartedAt = env.RunStartedAt
+	env.Public.DiscoveryEnv = env.DiscoveryEnv
 	return env.Public, nil
 }
 

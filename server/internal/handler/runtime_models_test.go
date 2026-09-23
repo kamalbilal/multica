@@ -8,6 +8,18 @@ import (
 	"time"
 )
 
+func TestSanitizeModelDiscoveryEnv(t *testing.T) {
+	if got := sanitizeModelDiscoveryEnv("cursor", map[string]string{"CURSOR_API_KEY": "x"}); got != nil {
+		t.Fatalf("cursor should not accept discovery env, got %#v", got)
+	}
+	if got := sanitizeModelDiscoveryEnv("cursor_sdk", map[string]string{"CURSOR_API_KEY": " agent-key "}); got == nil || got["CURSOR_API_KEY"] != "agent-key" {
+		t.Fatalf("cursor_sdk should forward CURSOR_API_KEY, got %#v", got)
+	}
+	if got := sanitizeModelDiscoveryEnv("cursor_sdk", map[string]string{"OTHER": "x"}); got != nil {
+		t.Fatalf("unexpected env %#v", got)
+	}
+}
+
 // TestModelListStore_RunningRequestTimesOut pins the escape hatch for
 // requests that were claimed (PopPending → Running) but whose result was
 // never reported — usually because the heartbeat response carrying the
@@ -17,7 +29,7 @@ import (
 func TestModelListStore_RunningRequestTimesOut(t *testing.T) {
 	ctx := context.Background()
 	store := NewInMemoryModelListStore()
-	req, err := store.Create(ctx, "runtime-xyz")
+	req, err := store.Create(ctx, "runtime-xyz", nil)
 	if err != nil {
 		t.Fatalf("create: %v", err)
 	}
@@ -63,7 +75,7 @@ func TestModelListStore_RunningRequestTimesOut(t *testing.T) {
 func TestReportModelListResult_PreservesDefault(t *testing.T) {
 	ctx := context.Background()
 	store := NewInMemoryModelListStore()
-	req, err := store.Create(ctx, "runtime-xyz")
+	req, err := store.Create(ctx, "runtime-xyz", nil)
 	if err != nil {
 		t.Fatalf("create: %v", err)
 	}
@@ -135,7 +147,7 @@ func TestInMemoryModelListStore_HasPending(t *testing.T) {
 		t.Fatalf("empty store should not report pending: has=%v err=%v", has, err)
 	}
 
-	if _, err := store.Create(ctx, "rt-1"); err != nil {
+	if _, err := store.Create(ctx, "rt-1", nil); err != nil {
 		t.Fatalf("create: %v", err)
 	}
 	if has, err := store.HasPending(ctx, "rt-1"); err != nil || !has {
@@ -161,11 +173,11 @@ func TestInMemoryModelListStore_PopPendingPicksOldest(t *testing.T) {
 	ctx := context.Background()
 	store := NewInMemoryModelListStore()
 
-	first, _ := store.Create(ctx, "rt-1")
+	first, _ := store.Create(ctx, "rt-1", nil)
 	// Force a measurable gap so the FIFO comparison isn't on equal
 	// CreatedAt values (possible on platforms with coarse clocks).
 	time.Sleep(2 * time.Millisecond)
-	second, _ := store.Create(ctx, "rt-1")
+	second, _ := store.Create(ctx, "rt-1", nil)
 
 	got, err := store.PopPending(ctx, "rt-1")
 	if err != nil {

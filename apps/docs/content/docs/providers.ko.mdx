@@ -27,6 +27,7 @@ Multica는 사용 중인 AI 코딩 도구를 대체하지 않습니다. 런타�
 | Codex | `codex` | ✓ | ✓ | `$CODEX_HOME/skills/` |
 | GitHub Copilot CLI | `copilot` | ✓ | — | `.github/skills/` |
 | Cursor Agent | `cursor-agent` | ✓ | ✓ | `.cursor/skills/` |
+| Cursor (SDK) | `cursor_sdk` (Node 22+) | ✓ | ✓ | `.cursor/skills/` |
 | DeepSeek Harness | `dsh` | ✓ | ✓ | `.dsh/skills/` |
 | DevEco Code | `deveco` | ✓ | — | `.deveco/skills/` |
 | Grok | `grok` | ✓ | ✓ | `.grok/skills/` |
@@ -45,6 +46,10 @@ Multica는 사용 중인 AI 코딩 도구를 대체하지 않습니다. 런타�
 | Reasonix | `reasonix` | ✓ | ✓ | `.reasonix/skills/` |
 | Trae CLI | `traecli` | ✓ | ✓ | `.traecli/skills/` |
 | Dim | `dim` | ✓ | ✓ | — |
+
+<Callout type="info">
+**Cursor (SDK)** 는 이 fork 전용 제공자(`cursor_sdk`)로, `cursor-agent` CLI 대신 로컬 `@cursor/sdk` 실행기를 사용합니다. MCP와 `.cursor/skills/` 경로는 Cursor Agent와 동일합니다. 설정은 저장소 루트의 `fork/docs/cursor-sdk-selfhost.md`를 참고하세요.
+</Callout>
 
 "Multica의 MCP 관리"는 에이전트 설정에 MCP server를 입력하면 Multica가 실행 전에 해당 도구로 전달할 수 있다는 뜻입니다. 도구 자체에 다른 MCP 설정 방법이 없다는 뜻은 아닙니다.
 

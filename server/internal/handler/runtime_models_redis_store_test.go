@@ -56,7 +56,7 @@ func TestRedisModelListStore_CreateGetComplete(t *testing.T) {
 	ctx := context.Background()
 	store := NewRedisModelListStore(rdb)
 
-	req, err := store.Create(ctx, "runtime-1")
+	req, err := store.Create(ctx, "runtime-1", nil)
 	if err != nil {
 		t.Fatalf("create: %v", err)
 	}
@@ -103,7 +103,7 @@ func TestRedisModelListStore_CreateWithoutMultiPermission(t *testing.T) {
 	ctx := context.Background()
 	store := NewRedisModelListStore(rdb)
 
-	req, err := store.Create(ctx, "runtime-no-multi")
+	req, err := store.Create(ctx, "runtime-no-multi", nil)
 	if err != nil {
 		t.Fatalf("create without MULTI permission: %v", err)
 	}
@@ -136,7 +136,7 @@ func TestRedisModelListStore_PopPendingAcrossInstances(t *testing.T) {
 	nodeA := NewRedisModelListStore(rdb)
 	nodeB := NewRedisModelListStore(rdb)
 
-	req, err := nodeA.Create(ctx, "runtime-cross")
+	req, err := nodeA.Create(ctx, "runtime-cross", nil)
 	if err != nil {
 		t.Fatalf("node A create: %v", err)
 	}
@@ -176,7 +176,7 @@ func TestRedisModelListStore_PopPendingConcurrent(t *testing.T) {
 	ctx := context.Background()
 	store := NewRedisModelListStore(rdb)
 
-	req, err := store.Create(ctx, "runtime-race")
+	req, err := store.Create(ctx, "runtime-race", nil)
 	if err != nil {
 		t.Fatalf("create: %v", err)
 	}
@@ -228,7 +228,7 @@ func TestRedisModelListStore_PendingTimeout(t *testing.T) {
 	ctx := context.Background()
 	store := NewRedisModelListStore(rdb)
 
-	req, err := store.Create(ctx, "runtime-timeout")
+	req, err := store.Create(ctx, "runtime-timeout", nil)
 	if err != nil {
 		t.Fatalf("create: %v", err)
 	}
@@ -267,7 +267,7 @@ func TestRedisModelListStore_RunningTimeout(t *testing.T) {
 	ctx := context.Background()
 	store := NewRedisModelListStore(rdb)
 
-	req, err := store.Create(ctx, "runtime-running-timeout")
+	req, err := store.Create(ctx, "runtime-running-timeout", nil)
 	if err != nil {
 		t.Fatalf("create: %v", err)
 	}
@@ -306,7 +306,7 @@ func TestRedisModelListStore_HasPending(t *testing.T) {
 		t.Fatalf("empty store should not report pending: has=%v err=%v", has, err)
 	}
 
-	if _, err := store.Create(ctx, "rt-1"); err != nil {
+	if _, err := store.Create(ctx, "rt-1", nil); err != nil {
 		t.Fatalf("create: %v", err)
 	}
 	if has, err := store.HasPending(ctx, "rt-1"); err != nil || !has {

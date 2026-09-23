@@ -2549,13 +2549,21 @@ export class ApiClient {
   // fabricated empty catalog or an endless spinner (MUL-5444).
   async initiateListModels(
     runtimeId: string,
-    options: { force?: boolean } = {},
+    options: {
+      force?: boolean;
+      discoveryEnv?: Record<string, string>;
+    } = {},
   ): Promise<RuntimeModelListRequest> {
     const query = options.force === true ? "?force=true" : "";
+    const discoveryEnv = options.discoveryEnv;
     const raw = await this.fetch<unknown>(
       `/api/runtimes/${runtimeId}/models${query}`,
       {
         method: "POST",
+        body:
+          discoveryEnv && Object.keys(discoveryEnv).length > 0
+            ? JSON.stringify({ discovery_env: discoveryEnv })
+            : undefined,
       },
     );
     return parseWithFallback<RuntimeModelListRequest>(
