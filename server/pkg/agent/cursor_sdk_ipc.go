@@ -278,9 +278,33 @@ func (c *CursorSdkClient) Execute(ctx context.Context, req CursorSdkExecuteReque
 		return CursorSdkResult{}, err
 	}
 
+	cancelWatch := make(chan struct{})
+	defer close(cancelWatch)
+	go func() {
+		select {
+		case <-ctx.Done():
+			cancelCtx := context.WithoutCancel(ctx)
+			if err := c.Cancel(cancelCtx); err != nil {
+				c.logger.Warn("cursor sdk cancel failed", "error", err)
+			}
+		case <-execDone:
+		case <-cancelWatch:
+		}
+	}()
+
 	select {
 	case <-ctx.Done():
-		return result, ctx.Err()
+		select {
+		case <-execDone:
+		case <-c.readDone:
+			if c.readErr != nil {
+				return result, c.readErr
+			}
+			if ctx.Err() != nil {
+				return result, ctx.Err()
+			}
+			return result, errors.New("cursor sdk executor exited during execute")
+		}
 	case <-execDone:
 	case <-c.readDone:
 		if c.readErr != nil {

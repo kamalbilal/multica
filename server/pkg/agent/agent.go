@@ -102,6 +102,10 @@ type ExecOptions struct {
 	CustomArgs       []string        // per-agent CLI arguments appended after ExtraArgs
 	QwenpawWorkspace string          // per-task QwenPaw workspace directory (passed as --workspace to qwenpaw acp); empty when not applicable
 	McpConfig        json.RawMessage // if non-nil, MCP server config to pass via --mcp-config
+	// McpConfigRefreshed signals that execenv.Reuse rewrote managed MCP sidecars
+	// before this turn. The cursor_sdk backend calls agent.reload() after resume
+	// so the SDK picks up the refreshed project-local MCP config.
+	McpConfigRefreshed bool
 	// ThinkingLevel is the runtime-native reasoning/effort value (e.g.
 	// Claude's "low|medium|high|xhigh|max", Codex's "none|minimal|low|
 	// medium|high|xhigh", OpenCode's model variant names). Empty means

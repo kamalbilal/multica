@@ -3,9 +3,11 @@ package agent
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"strings"
+	"sync/atomic"
 	"time"
 )
 
@@ -36,10 +38,25 @@ func (b *cursorSdkBackend) Execute(ctx context.Context, prompt string, opts Exec
 	msgCh := make(chan Message, 256)
 	resCh := make(chan Result, 1)
 
+	var runRunning atomic.Bool
+	reloadAfterMcpRefresh := opts.McpConfigRefreshed
+	var reloadedAfterMcpRefresh atomic.Bool
+
+	supplement := func(supplementCtx context.Context, instruction string) error {
+		if !runRunning.Load() {
+			return errors.New("cursor sdk run has not started")
+		}
+		return client.Steer(supplementCtx, instruction)
+	}
+	supplementReady := func() bool {
+		return runRunning.Load()
+	}
+
 	go func() {
 		defer cancel()
 		defer close(msgCh)
 		defer close(resCh)
+		defer runRunning.Store(false)
 		defer func() {
 			if err := client.Close(); err != nil {
 				b.cfg.Logger.Warn("cursor sdk executor close failed", "error", err)
@@ -69,8 +86,17 @@ func (b *cursorSdkBackend) Execute(ctx context.Context, prompt string, opts Exec
 			switch evt.Event {
 			case cursorSdkEventAgentID:
 				sessionID = strings.TrimSpace(evt.AgentID)
+				if reloadAfterMcpRefresh && reloadedAfterMcpRefresh.CompareAndSwap(false, true) {
+					reloadCtx := context.WithoutCancel(runCtx)
+					if err := client.Reload(reloadCtx); err != nil {
+						b.cfg.Logger.Warn("cursor sdk reload after mcp refresh failed", "error", err)
+					}
+				}
 			case cursorSdkEventMessage:
 				if msg, ok := cursorSdkMessageFromEvent(evt); ok {
+					if msg.Type == MessageStatus && msg.Status == "running" {
+						runRunning.Store(true)
+					}
 					if msg.Type == MessageText {
 						output.WriteString(msg.Content)
 					}
@@ -153,8 +179,10 @@ func (b *cursorSdkBackend) Execute(ctx context.Context, prompt string, opts Exec
 	}()
 
 	return &Session{
-		Messages: msgCh,
-		Result:   resCh,
+		Supplement:      supplement,
+		SupplementReady: supplementReady,
+		Messages:        msgCh,
+		Result:          resCh,
 	}, nil
 }
 

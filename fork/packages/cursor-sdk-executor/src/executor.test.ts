@@ -57,7 +57,7 @@ vi.mock("@cursor/sdk", () => ({
   },
 }));
 
-import { dispatchCommand, handleExecute } from "./executor.js";
+import { dispatchCommand, handleExecute, handleSteer } from "./executor.js";
 
 describe("executor", () => {
   beforeEach(() => {
@@ -165,6 +165,36 @@ describe("executor", () => {
       { event: "error", message: "missing CURSOR_API_KEY", retryable: false },
     ]);
     expect(mockCreate).not.toHaveBeenCalled();
+  });
+
+  it("steer targets the active run", async () => {
+    const mockRun = createMockRun();
+    mockRun.stream = async function* () {
+      await new Promise(() => {});
+    };
+    mockRun.wait = vi.fn(() => new Promise(() => {}));
+    mockSend.mockResolvedValue(mockRun);
+    mockCreate.mockResolvedValue(createMockAgent());
+
+    void handleExecute(
+      {
+        cmd: "execute",
+        id: "req-steer-setup",
+        prompt: "start",
+        cwd: "/tmp/workdir",
+        model: "composer-2.5",
+      },
+      () => {},
+    );
+
+    for (let attempt = 0; attempt < 50 && mockSend.mock.calls.length === 0; attempt += 1) {
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    }
+    expect(mockSend).toHaveBeenCalledOnce();
+
+    await handleSteer({ cmd: "steer", id: "req-steer", text: "add this detail" }, () => {});
+
+    expect(mockRun.steer).toHaveBeenCalledWith("add this detail");
   });
 
   it("list-models emits models event", async () => {

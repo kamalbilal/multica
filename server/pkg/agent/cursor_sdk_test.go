@@ -219,6 +219,312 @@ func readSessionResult(ch <-chan Result, timeout time.Duration) (Result, bool) {
 	}
 }
 
+const supplementCursorSdkExecutorScript = `
+const readline = require("node:readline");
+
+let executeRunning = false;
+let finishExecute = null;
+const steerLines = [];
+
+const rl = readline.createInterface({ input: process.stdin, crlfDelay: Infinity });
+
+function emit(event) {
+  process.stdout.write(JSON.stringify(event) + "\n");
+}
+
+rl.on("line", (line) => {
+  const trimmed = line.trim();
+  if (!trimmed) {
+    return;
+  }
+
+  let cmd;
+  try {
+    cmd = JSON.parse(trimmed);
+  } catch {
+    return;
+  }
+
+  switch (cmd.cmd) {
+    case "execute":
+      executeRunning = true;
+      emit({ event: "agent_id", agentId: "agent-supplement-test" });
+      emit({ event: "message", type: "status", status: "running" });
+      finishExecute = () => {
+        executeRunning = false;
+        emit({
+          event: "result",
+          status: "completed",
+          output: "steered ok",
+        });
+      };
+      break;
+    case "steer":
+      steerLines.push(cmd.text);
+      if (finishExecute) {
+        finishExecute();
+        finishExecute = null;
+      }
+      break;
+    case "reload":
+      break;
+    case "shutdown":
+      rl.close();
+      process.exit(0);
+      break;
+    default:
+      break;
+  }
+});
+`
+
+func TestCursorSdkSupplementSteers(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	script := filepath.Join(dir, "supplement-cursor-sdk-executor.js")
+	if err := os.WriteFile(script, []byte(supplementCursorSdkExecutorScript), 0o644); err != nil {
+		t.Fatalf("write fake executor: %v", err)
+	}
+
+	backend, err := New("cursor_sdk", Config{
+		ExecutablePath: script,
+		Logger:         slog.Default(),
+	})
+	if err != nil {
+		t.Fatalf("New(cursor_sdk): %v", err)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	session, err := backend.Execute(ctx, "do work", ExecOptions{
+		Cwd:                  t.TempDir(),
+		Model:                "composer-2",
+		EnableTaskSupplement: true,
+		McpConfigRefreshed:   true,
+	})
+	if err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+	if session.Supplement == nil || session.SupplementReady == nil {
+		t.Fatal("cursor sdk session missing supplement hooks")
+	}
+
+	deadline := time.Now().Add(5 * time.Second)
+	for !session.SupplementReady() {
+		if time.Now().After(deadline) {
+			t.Fatal("timed out waiting for supplement-ready cursor sdk run")
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+
+	if err := session.Supplement(ctx, "keep the original goal and add this"); err != nil {
+		t.Fatalf("Supplement: %v", err)
+	}
+
+	result, ok := readSessionResult(session.Result, 5*time.Second)
+	if !ok {
+		t.Fatal("timed out waiting for cursor sdk result")
+	}
+	if result.Status != "completed" {
+		t.Fatalf("status = %q, want completed (error=%q)", result.Status, result.Error)
+	}
+	if result.Output != "steered ok" {
+		t.Fatalf("output = %q, want steered ok", result.Output)
+	}
+}
+
+func TestCursorSdkSupplementFailsClosedWithoutActiveRun(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	script := filepath.Join(dir, "supplement-closed-cursor-sdk-executor.js")
+	if err := os.WriteFile(script, []byte(supplementCursorSdkExecutorScript), 0o644); err != nil {
+		t.Fatalf("write fake executor: %v", err)
+	}
+
+	backend, err := New("cursor_sdk", Config{
+		ExecutablePath: script,
+		Logger:         slog.Default(),
+	})
+	if err != nil {
+		t.Fatalf("New(cursor_sdk): %v", err)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	session, err := backend.Execute(ctx, "do work", ExecOptions{
+		Cwd:   t.TempDir(),
+		Model: "composer-2",
+	})
+	if err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+	if session.Supplement == nil {
+		t.Fatal("cursor sdk session missing supplement hook")
+	}
+	if err := session.Supplement(ctx, "extra"); err == nil {
+		t.Fatal("Supplement succeeded without an active run")
+	}
+	cancel()
+	readSessionResult(session.Result, 5*time.Second)
+}
+
+const reloadCursorSdkExecutorScript = `
+const readline = require("node:readline");
+
+let finishExecute = null;
+let reloadCalled = false;
+
+const rl = readline.createInterface({ input: process.stdin, crlfDelay: Infinity });
+
+function emit(event) {
+  process.stdout.write(JSON.stringify(event) + "\n");
+}
+
+rl.on("line", (line) => {
+  const trimmed = line.trim();
+  if (!trimmed) {
+    return;
+  }
+
+  let cmd;
+  try {
+    cmd = JSON.parse(trimmed);
+  } catch {
+    return;
+  }
+
+  switch (cmd.cmd) {
+    case "execute":
+      emit({ event: "agent_id", agentId: "agent-reload-test" });
+      emit({ event: "message", type: "status", status: "running" });
+      finishExecute = () => {
+        emit({
+          event: "result",
+          status: "completed",
+          output: reloadCalled ? "reloaded" : "missing reload",
+        });
+      };
+      break;
+    case "reload":
+      reloadCalled = true;
+      if (finishExecute) {
+        finishExecute();
+        finishExecute = null;
+      }
+      break;
+    case "shutdown":
+      rl.close();
+      process.exit(0);
+      break;
+    default:
+      break;
+  }
+});
+`
+
+func TestCursorSdkReloadAfterMcpRefresh(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	script := filepath.Join(dir, "reload-cursor-sdk-executor.js")
+	if err := os.WriteFile(script, []byte(reloadCursorSdkExecutorScript), 0o644); err != nil {
+		t.Fatalf("write reload executor: %v", err)
+	}
+
+	backend, err := New("cursor_sdk", Config{
+		ExecutablePath: script,
+		Logger:         slog.Default(),
+	})
+	if err != nil {
+		t.Fatalf("New(cursor_sdk): %v", err)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	session, err := backend.Execute(ctx, "do work", ExecOptions{
+		Cwd:                t.TempDir(),
+		Model:              "composer-2",
+		McpConfigRefreshed: true,
+	})
+	if err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+
+	result, ok := readSessionResult(session.Result, 5*time.Second)
+	if !ok {
+		t.Fatal("timed out waiting for cursor sdk reload result")
+	}
+	if result.Status != "completed" {
+		t.Fatalf("status = %q, want completed (error=%q)", result.Status, result.Error)
+	}
+	if result.Output != "reloaded" {
+		t.Fatalf("output = %q, want reloaded", result.Output)
+	}
+}
+
+func TestCursorSdkCancelDrainsResult(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	cancelScript := `
+const readline = require("node:readline");
+const rl = readline.createInterface({ input: process.stdin, crlfDelay: Infinity });
+function emit(event) { process.stdout.write(JSON.stringify(event) + "\n"); }
+rl.on("line", (line) => {
+  const cmd = JSON.parse(line.trim());
+  switch (cmd.cmd) {
+    case "execute":
+      emit({ event: "agent_id", agentId: "agent-cancel-test" });
+      emit({ event: "message", type: "status", status: "running" });
+      break;
+    case "cancel":
+      emit({ event: "result", status: "cancelled", output: "" });
+      break;
+    case "shutdown":
+      rl.close();
+      process.exit(0);
+  }
+});
+`
+	script := filepath.Join(dir, "cancel-cursor-sdk-executor.js")
+	if err := os.WriteFile(script, []byte(cancelScript), 0o644); err != nil {
+		t.Fatalf("write cancel executor: %v", err)
+	}
+
+	clientCtx, clientCancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer clientCancel()
+	client, err := NewCursorSdkClient(clientCtx, script, slog.Default())
+	if err != nil {
+		t.Fatalf("NewCursorSdkClient: %v", err)
+	}
+	defer func() {
+		_ = client.Close()
+	}()
+
+	execCtx, cancelExec := context.WithCancel(context.Background())
+	go func() {
+		time.Sleep(100 * time.Millisecond)
+		cancelExec()
+	}()
+
+	result, err := client.Execute(execCtx, CursorSdkExecuteRequest{
+		Prompt: "prompt",
+		Cwd:    t.TempDir(),
+		Model:  "composer-2",
+	}, nil)
+	if err != nil {
+		t.Fatalf("Execute after cancel: %v", err)
+	}
+	if result.Status != "cancelled" {
+		t.Fatalf("result status = %q, want cancelled", result.Status)
+	}
+}
+
 func TestLaunchHeaderIncludesCursorSdk(t *testing.T) {
 	t.Parallel()
 

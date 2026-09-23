@@ -137,6 +137,8 @@ func SupportsTaskSupplement(provider, version string) bool {
 		// 2.1.110 fixes PreToolUse additionalContext being lost on tool failure.
 		// https://github.com/anthropics/claude-code/blob/main/CHANGELOG.md
 		minimum = "2.1.110"
+	case "cursor_sdk":
+		return true
 	default:
 		return false
 	}
