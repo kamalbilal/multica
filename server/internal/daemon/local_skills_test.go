@@ -813,7 +813,7 @@ func TestLoadRuntimeLocalSkillBundle_CursorSdk(t *testing.T) {
 
 func testLoadRuntimeLocalSkillBundleCursorFamily(t *testing.T, provider string) {
 	home := t.TempDir()
-	t.Setenv("HOME", home)
+	setTestUserHome(t, home)
 
 	writeTestLocalSkill(t, filepath.Join(home, ".cursor", "skills"), "docs-helper", map[string]string{
 		"SKILL.md":         "---\nname: Docs Helper\n---\n# Docs Helper\n",
