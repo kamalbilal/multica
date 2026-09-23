@@ -373,6 +373,7 @@ var SupportedTypes = []string{
 	"hermes",
 	"pi",
 	"cursor",
+	"cursor_sdk",
 	"kimi",
 	"reasonix",
 	"dsh",
@@ -466,6 +467,8 @@ func New(agentType string, cfg Config) (Backend, error) {
 		return &piBackend{cfg: cfg}, nil
 	case "cursor":
 		return &cursorBackend{cfg: cfg}, nil
+	case "cursor_sdk":
+		return &cursorSdkBackend{cfg: cfg}, nil
 	case "kimi":
 		return &kimiBackend{cfg: cfg}, nil
 	case "reasonix":
@@ -520,6 +523,7 @@ var launchHeaders = map[string]string{
 	"codex":       "codex app-server",
 	"copilot":     "copilot (json)",
 	"cursor":      "cursor-agent (stream-json)",
+	"cursor_sdk":  "cursor-sdk (local @cursor/sdk)",
 	"codearts":    "codearts run (json)",
 	"deveco":      "deveco run (json)",
 	"hermes":      "hermes acp",
