@@ -1,4 +1,4 @@
-.PHONY: help makehelp dev server daemon cli multica build test migrate-up migrate-down sqlc seed clean setup start stop check worktree-env setup-main start-main stop-main check-main setup-worktree start-worktree stop-worktree check-worktree remove-worktree db-up db-down db-drop db-reset selfhost selfhost-build selfhost-stop up down status list destroy gc env-exec api-dev web-dev desktop-dev cursor-sdk-executor
+.PHONY: help makehelp dev server daemon cli multica build test migrate-up migrate-down sqlc seed clean setup start stop check worktree-env setup-main start-main stop-main check-main setup-worktree start-worktree stop-worktree check-worktree remove-worktree db-up db-down db-drop db-reset selfhost selfhost-build selfhost-stop up down status list destroy gc env-exec api-dev web-dev desktop-dev api-prod web-prod cursor-sdk-executor
 
 MAIN_ENV_FILE ?= .env
 WORKTREE_ENV_FILE ?= .env.worktree
@@ -188,6 +188,13 @@ web-dev: ## Run only the Next.js dev server for the current env file
 
 desktop-dev: ## Run only the Electron desktop app for the current env file
 	pnpm dev:desktop
+
+api-prod: EXE = $(if $(filter windows,$(or $(GOOS),$(shell go env GOOS))),.exe,)
+api-prod: build ## Run the compiled Go backend for the current env file
+	cd server && ./bin/server$(EXE)
+
+web-prod: ## Run the production Next.js server for the current env file
+	cd apps/web && PORT=$(FRONTEND_PORT) pnpm start
 
 # ---------- One-click commands ----------
 ##@ One-click

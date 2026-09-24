@@ -34,6 +34,16 @@ async function main(): Promise<void> {
       continue;
     }
 
+    // cancel/steer/reload must not queue behind a long-running execute: the Go
+    // daemon sends them while execute is still streaming, and serializing them
+    // behind execute would deadlock the run.
+    if (cmd.cmd === "cancel" || cmd.cmd === "steer" || cmd.cmd === "reload") {
+      void dispatchCommand(cmd, emit).catch((err) => {
+        logError(err instanceof Error ? err.message : String(err));
+      });
+      continue;
+    }
+
     const run = commandQueue.then(() => dispatchCommand(cmd, emit));
     commandQueue = run.catch((err) => {
       logError(err instanceof Error ? err.message : String(err));

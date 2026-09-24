@@ -9,7 +9,7 @@ import { useActorName } from "@multica/core/workspace/hooks";
 import { useTaskMessages } from "@multica/core/chat/queries";
 import { useCancelIssueRun, useCreateTaskSupplement, useRetryIssueRun } from "@multica/core/issues/mutations";
 import { useCommentDraftStore, useTaskSupplementDraftStore } from "@multica/core/issues/stores";
-import { dispatchReasonCode } from "@multica/core/api";
+import { dispatchReasonCode, errorCode } from "@multica/core/api";
 import type { AgentTask } from "@multica/core/types";
 import { ActorAvatar } from "../../common/actor-avatar";
 import { Button } from "@multica/ui/components/ui/button";
@@ -154,7 +154,7 @@ export function InlineCommentRun({ run, className, viewState, showIdentity = fal
     useTaskSupplementDraftStore.getState().setRequestId(task.id, clientRequestId);
     supplement.mutate({ taskId: task.id, content, clientRequestId }, {
       onError: (error) => {
-        const code = dispatchReasonCode(error);
+        const code = dispatchReasonCode(error) ?? errorCode(error);
         if (code === "task_supplement_turn_ended") {
           useTaskSupplementDraftStore.getState().markEnded(task.id);
         }

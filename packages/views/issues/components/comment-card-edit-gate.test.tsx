@@ -20,7 +20,7 @@ let mockUploadIdSeq = 0;
 
 vi.mock("@multica/core/api", () => ({
   // Uploads flow through the coordinator, which calls api.uploadFile (MUL-5181).
-  api: { uploadFile: apiUploadFile },
+  api: { uploadFile: apiUploadFile, listTasksByIssue: vi.fn().mockResolvedValue([]), createTaskSupplement: vi.fn() },
   dispatchReasonCode: () => undefined,
   errorCode: (error: unknown) =>
     typeof error === "object" && error !== null && "body" in error

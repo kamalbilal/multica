@@ -41,6 +41,7 @@ WORKSPACE_SLUG="${MULTICA_DEV_WORKSPACE_SLUG:-dev}"
 
 ALL_COMPONENTS="api web daemon desktop"
 DEFAULT_COMPONENTS="api web"
+COMPONENT_RUN_MODE="${MULTICA_COMPONENT_RUN_MODE:-dev}"
 
 # An agent runs with TMPDIR=/tmp/multica-task-<id>, deleted when the run ends.
 # Anything the Go toolchain builds there goes with it, so a binary started from
@@ -513,6 +514,91 @@ launch_detached() {
   )
 }
 
+dev_env_has_make() {
+  command -v make >/dev/null 2>&1
+}
+
+component_run_mode_label() {
+  if [ "$COMPONENT_RUN_MODE" = production ]; then
+    printf production
+  else
+    printf dev
+  fi
+}
+
+require_production_artifacts() {
+  local component=$1 exe=""
+  case "$(uname -s 2>/dev/null)" in
+    MINGW*|MSYS*|CYGWIN*) exe=.exe ;;
+  esac
+  case "$component" in
+    api)
+      [ -f "$REPO_ROOT/server/bin/server$exe" ] \
+        || die "Missing server binary. Run: just build"
+      ;;
+    web)
+      [ -f "$REPO_ROOT/apps/web/.next/BUILD_ID" ] \
+        && [ -d "$REPO_ROOT/apps/web/.next/static" ] \
+        || die "Missing or incomplete web build. Run: just build"
+      ;;
+    desktop)
+      die "Desktop is not supported in production mode."
+      ;;
+  esac
+}
+
+# make loads ENV_FILE itself; on Windows Git Bash make is often missing, so run
+# the same targets through scripts/run-component.sh instead.
+launch_component() {
+  local name=$1 component=$2 expected_commit=${3:-}
+  local mode
+  mode="$(component_run_mode_label)"
+  if [ "$mode" = production ]; then
+    require_production_artifacts "$component"
+  fi
+  if dev_env_has_make; then
+    case "$component" in
+      api)
+        if [ "$mode" = production ]; then
+          launch_detached "$name" make -C "$REPO_ROOT" -s api-prod ENV_FILE="$ENV_FILE"
+        else
+          launch_detached "$name" make -C "$REPO_ROOT" -s api-dev ENV_FILE="$ENV_FILE" COMMIT="$expected_commit"
+        fi
+        ;;
+      web)
+        if [ "$mode" = production ]; then
+          launch_detached "$name" make -C "$REPO_ROOT" -s web-prod ENV_FILE="$ENV_FILE"
+        else
+          launch_detached "$name" make -C "$REPO_ROOT" -s web-dev ENV_FILE="$ENV_FILE"
+        fi
+        ;;
+      desktop)
+        [ "$mode" = production ] && die "Desktop is not supported in production mode."
+        launch_detached "$name" env \
+          DESKTOP_RENDERER_PORT="$DESKTOP_RENDERER_PORT" DESKTOP_APP_SUFFIX="$DESKTOP_APP_SUFFIX" \
+          make -C "$REPO_ROOT" -s desktop-dev ENV_FILE="$ENV_FILE"
+        ;;
+      *) die "Unknown component '$component'" ;;
+    esac
+    return 0
+  fi
+  case "$component" in
+    api)
+      launch_detached "$name" bash "$REPO_ROOT/scripts/run-component.sh" api "$ENV_FILE" "$expected_commit" "$mode"
+      ;;
+    web)
+      launch_detached "$name" bash "$REPO_ROOT/scripts/run-component.sh" web "$ENV_FILE" "" "$mode"
+      ;;
+    desktop)
+      [ "$mode" = production ] && die "Desktop is not supported in production mode."
+      launch_detached "$name" env \
+        DESKTOP_RENDERER_PORT="$DESKTOP_RENDERER_PORT" DESKTOP_APP_SUFFIX="$DESKTOP_APP_SUFFIX" \
+        bash "$REPO_ROOT/scripts/run-component.sh" desktop "$ENV_FILE"
+      ;;
+    *) die "Unknown component '$component'" ;;
+  esac
+}
+
 health_json() { curl -sf --max-time 3 "http://localhost:${BACKEND_PORT}/health" 2>/dev/null; }
 
 json_field() {
@@ -670,7 +756,7 @@ Run 'make down' here first — a leftover instance answers /health with 200 and 
   fi
 
   launched_at="$(now_epoch)"
-  launch_detached api make -C "$REPO_ROOT" -s api-dev ENV_FILE="$ENV_FILE" COMMIT="$expected_commit"
+  launch_component api api "$expected_commit"
   info "api launching (pid $(cat "$(pid_file api)")), log: $(log_file api)"
 
   while [ "$waited" -lt 300 ]; do
@@ -709,7 +795,7 @@ start_web() {
     die "Port $FRONTEND_PORT is busy: $(describe_port_owner "$FRONTEND_PORT"). Run 'make down' here first."
   fi
 
-  launch_detached web make -C "$REPO_ROOT" -s web-dev ENV_FILE="$ENV_FILE"
+  launch_component web web
   info "web launching (pid $(cat "$(pid_file web)")), log: $(log_file web)"
 
   while [ "$waited" -lt 300 ]; do
@@ -880,9 +966,7 @@ start_desktop() {
 VITE_API_URL=http://localhost:${BACKEND_PORT}
 VITE_WS_URL=ws://localhost:${BACKEND_PORT}/ws
 EOF
-  launch_detached desktop env \
-    DESKTOP_RENDERER_PORT="$DESKTOP_RENDERER_PORT" DESKTOP_APP_SUFFIX="$DESKTOP_APP_SUFFIX" \
-    make -C "$REPO_ROOT" -s desktop-dev ENV_FILE="$ENV_FILE"
+  launch_component desktop desktop
 
   while [ "$waited" -lt 300 ]; do
     if curl -sf --max-time 10 "http://localhost:${DESKTOP_RENDERER_PORT}" >/dev/null 2>&1; then
@@ -1208,6 +1292,7 @@ cmd_up() {
       --components|-c) requested="$(printf '%s' "$2" | tr ',' ' ')"; shift 2 ;;
       --all) requested="$ALL_COMPONENTS"; shift ;;
       --name) name="$2"; shift 2 ;;
+      --production) COMPONENT_RUN_MODE=production; shift ;;
       --ephemeral) owner=agent; lifecycle_requested=1; [ "$ttl" != 0 ] || ttl=24; shift ;;
       --ttl) ttl="$2"; owner=agent; lifecycle_requested=1; shift 2 ;;
       *) die "Unknown flag for up: $1" ;;
@@ -1264,7 +1349,9 @@ Start the rest with 'make up C=api,web', or run 'make up C=daemon' from your own
     fi
     info "Created $ENV_FILE"
   fi
-  ensure_dev_code "$ENV_FILE"
+  if [ "$COMPONENT_RUN_MODE" != production ]; then
+    ensure_dev_code "$ENV_FILE"
+  fi
   ensure_cursor_sdk_executor "$ENV_FILE"
   load_env_file "$ENV_FILE"
 
@@ -1592,7 +1679,7 @@ usage() {
 Local development environments: named, listable, deletable.
 
   dev-env.sh up      [--components api,web,daemon,desktop] [--all]
-                     [--name N] [--ephemeral] [--ttl HOURS]
+                     [--production] [--name N] [--ephemeral] [--ttl HOURS]
   dev-env.sh status  [name] [--json]
   dev-env.sh list    [--json]
   dev-env.sh down    [name] [--components ...]

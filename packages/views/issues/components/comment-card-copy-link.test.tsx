@@ -11,7 +11,7 @@ import { renderWithI18n } from "../../test/i18n";
 // row's own id to the handler and hides the item when no handler is wired.
 
 vi.mock("@multica/core/api", () => ({
-  api: { uploadFile: vi.fn() },
+  api: { uploadFile: vi.fn(), listTasksByIssue: vi.fn().mockResolvedValue([]), createTaskSupplement: vi.fn() },
   dispatchReasonCode: () => undefined,
   errorCode: () => undefined,
 }));

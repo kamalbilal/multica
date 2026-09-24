@@ -51,6 +51,18 @@ The daemon probe requires Node 22+ and a readable executor script. When both are
   `cursor_sdk` yet. Long-running shell tools without steady heartbeats may hit
   the idle watchdog sooner than on the CLI provider.
 
+`cursor_sdk` still ends a hung turn after a successful
+`multica issue comment add`, but only once the model has gone idle.
+A progress comment, more tools, or a mid-run supplement (`run.steer()`)
+resets that idle window so the agent can keep working. Immediate cancel
+on the first comment treated status posts as the final answer and dropped
+guidance that arrived while that comment was in flight. If cancel does not
+finish, the executor is killed so the Multica task cannot stay `running`
+after the comment is already on the issue. The executor also aborts
+`run.stream()` immediately on `cancel` rather than waiting for
+`run.cancel()`, and it cancels leftover active runs before a resume
+`send()`.
+
 ## Create a `cursor_sdk` agent
 
 1. Open **Settings → Agents → Create agent**.

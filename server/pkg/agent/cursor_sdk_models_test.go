@@ -3,6 +3,7 @@ package agent
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
 	"testing"
@@ -268,5 +269,85 @@ rl.on("line", (line) => {
 	}
 	if result.Output != "fresh start" {
 		t.Fatalf("output = %q, want fresh start", result.Output)
+	}
+}
+
+func TestCursorSdkResumeBusyRetriesFreshAgent(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	script := filepath.Join(dir, "resume-busy-executor.js")
+	const resumeBusyScript = `
+const readline = require("node:readline");
+const rl = readline.createInterface({ input: process.stdin, crlfDelay: Infinity });
+rl.on("line", (line) => {
+  const cmd = JSON.parse(line.trim());
+  switch (cmd.cmd) {
+    case "execute":
+      if (cmd.agentId) {
+        process.stdout.write(JSON.stringify({ event: "error", message: "Agent " + cmd.agentId + " already has active run", retryable: false }) + "\n");
+        break;
+      }
+      process.stdout.write(JSON.stringify({ event: "agent_id", agentId: "agent-fresh" }) + "\n");
+      process.stdout.write(JSON.stringify({ event: "result", status: "completed", output: "fresh start" }) + "\n");
+      break;
+    case "messages-list":
+      process.stdout.write(JSON.stringify({ event: "messages", items: [] }) + "\n");
+      break;
+    case "shutdown":
+      rl.close();
+      process.exit(0);
+  }
+});
+`
+	if err := os.WriteFile(script, []byte(resumeBusyScript), 0o644); err != nil {
+		t.Fatalf("write executor: %v", err)
+	}
+
+	backend, err := New("cursor_sdk", Config{
+		ExecutablePath: script,
+		Logger:         slog.Default(),
+	})
+	if err != nil {
+		t.Fatalf("New(cursor_sdk): %v", err)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	session, err := backend.Execute(ctx, "continue task", ExecOptions{
+		Cwd:                    t.TempDir(),
+		Model:                  "composer-2",
+		ResumeSessionID:        "agent-busy",
+		ResumeExpected:         true,
+		ResumeContinuityNotice: "continuity notice\n\n",
+	})
+	if err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+
+	for range session.Messages {
+	}
+	result := <-session.Result
+
+	if result.Status != "completed" {
+		t.Fatalf("expected completed retry, got %#v", result)
+	}
+	if result.SessionID != "agent-fresh" {
+		t.Fatalf("session id = %q, want agent-fresh", result.SessionID)
+	}
+}
+
+func TestCursorSdkIsResumeError(t *testing.T) {
+	t.Parallel()
+
+	if !cursorSdkIsResumeError(errors.New("Agent agent-1 already has active run")) {
+		t.Fatal("expected already-has-active-run to be a resume error")
+	}
+	if !cursorSdkIsResumeError(errors.New("Agent agent-old not found")) {
+		t.Fatal("expected agent-not-found to be a resume error")
+	}
+	if cursorSdkIsResumeError(errors.New("missing CURSOR_API_KEY")) {
+		t.Fatal("did not expect missing key to be a resume error")
 	}
 }

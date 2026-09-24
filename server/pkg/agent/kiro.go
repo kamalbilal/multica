@@ -537,75 +537,12 @@ func isKiroOversizedHistoryImage(err error) bool {
 		strings.Contains(data, "image dimensions exceed max allowed size")
 }
 
-// isKiroIssueCommentAddTool reports whether a tool-use message is a
-// `multica issue comment add` invocation. It keys purely off the command
-// payload, not the normalized tool name: GPT-5.6 Sol adapters may title the
-// shell tool with a name that doesn't fold into "terminal" (the earlier
-// msg.Tool=="terminal" gate silently dropped those and left completed tasks
-// marked failed — see #5509). isKiroIssueCommentAddCommand is strict enough
-// that no non-shell tool's input will accidentally match.
 func isKiroIssueCommentAddTool(msg Message) bool {
-	command, _ := msg.Input["command"].(string)
-	return isKiroIssueCommentAddCommand(command)
+	return isMulticaIssueCommentAddTool(msg)
 }
 
 func isKiroIssueCommentAddCommand(command string) bool {
-	parts := trimLeadingEnvAssignments(strings.Fields(command))
-	// Some runtimes route terminal calls through a shell wrapper such as
-	// `sh -c "multica issue comment add ..."`; unwrap a single such layer so
-	// the real invocation is still recognized.
-	if len(parts) >= 3 && isPOSIXShellName(parts[0]) && parts[1] == "-c" {
-		inner := strings.Trim(strings.Join(parts[2:], " "), "\"'")
-		parts = trimLeadingEnvAssignments(strings.Fields(inner))
-	}
-	if len(parts) < 4 {
-		return false
-	}
-	executable := strings.TrimPrefix(parts[0], "./")
-	if executable != "multica" && !strings.HasSuffix(executable, "/multica") {
-		return false
-	}
-	return parts[1] == "issue" && parts[2] == "comment" && parts[3] == "add"
-}
-
-// trimLeadingEnvAssignments drops leading `KEY=VALUE` tokens so an invocation
-// like `MULTICA_TOKEN=x multica issue comment add ...` is still recognized.
-func trimLeadingEnvAssignments(parts []string) []string {
-	for len(parts) > 0 && isEnvAssignment(parts[0]) {
-		parts = parts[1:]
-	}
-	return parts
-}
-
-// isEnvAssignment reports whether tok is a `NAME=value` shell env assignment.
-func isEnvAssignment(tok string) bool {
-	eq := strings.IndexByte(tok, '=')
-	if eq <= 0 {
-		return false
-	}
-	for i := 0; i < eq; i++ {
-		c := tok[i]
-		switch {
-		case c == '_', c >= 'A' && c <= 'Z', c >= 'a' && c <= 'z':
-		case i > 0 && c >= '0' && c <= '9':
-		default:
-			return false
-		}
-	}
-	return true
-}
-
-// isPOSIXShellName reports whether tok names a shell that takes `-c <command>`.
-func isPOSIXShellName(tok string) bool {
-	if i := strings.LastIndexByte(tok, '/'); i >= 0 {
-		tok = tok[i+1:]
-	}
-	switch tok {
-	case "sh", "bash", "zsh", "dash":
-		return true
-	default:
-		return false
-	}
+	return isMulticaIssueCommentAddCommand(command)
 }
 
 func kiroToolNameFromTitle(title string) string {

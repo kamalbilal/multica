@@ -42,6 +42,7 @@ export function mapSdkMessage(event: SDKMessage): IpcMessageEvent | null {
           tool: event.name,
           callId: event.call_id,
           output: serializeToolOutput(event.result),
+          status: event.status,
         };
       }
       return null;

@@ -68,11 +68,26 @@ git log --oneline main..upstream/main
 
 ## First-time development setup
 
-Prerequisites: Node.js 22, pnpm 10.28.2, Go 1.26.6, Docker.
+Prerequisites: Node.js 22, pnpm 10.28.2, Go 1.26.6, Docker, [just](https://github.com/casey/just) (optional).
 
 ```bash
 make dev
 ```
+
+### Production self-host (fork)
+
+With [just](https://github.com/casey/just) installed (`winget install Casey.Just`) and Git Bash on `PATH`:
+
+```bash
+just build            # compile Go server/CLI + Next.js web (+ cursor_sdk executor)
+just up               # start production api, web, and daemon (not dev servers)
+just restart          # stop + start again (does not rebuild)
+just refresh          # alias for restart
+just status           # show ports and running components
+just rebuild-restart  # build, then restart
+```
+
+Hot reload while developing: `make up` or `make dev`.
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) for worktrees, testing, and troubleshooting.
 

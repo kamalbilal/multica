@@ -17,7 +17,7 @@ const dispatchReasonCodeMock = vi.hoisted(() => vi.fn());
 vi.mock("@multica/core/api", () => ({ api: {
   getIssue: vi.fn(), listTaskMessages: vi.fn(), cancelTask: vi.fn(), rerunIssue: vi.fn(),
   createTaskSupplement: vi.fn(), retryTaskSupplement: vi.fn(), listTasksByIssue: vi.fn(),
-}, dispatchReasonCode: dispatchReasonCodeMock }));
+}, dispatchReasonCode: dispatchReasonCodeMock, errorCode: () => undefined }));
 vi.mock("@multica/core/hooks", () => ({ useWorkspaceId: () => "workspace" }));
 vi.mock("@multica/core/workspace/hooks", () => ({ useActorName: () => ({ getActorName: () => "Reviewer" }) }));
 vi.mock("../../common/actor-avatar", () => ({ ActorAvatar: () => <span /> }));

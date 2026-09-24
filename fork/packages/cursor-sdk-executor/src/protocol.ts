@@ -66,7 +66,7 @@ export type IpcMessageEvent =
   | { event: "message"; type: "assistant"; content: string }
   | { event: "message"; type: "thinking"; content: string }
   | { event: "message"; type: "tool_use"; tool: string; callId: string; input: unknown }
-  | { event: "message"; type: "tool_result"; tool: string; callId: string; output: string }
+  | { event: "message"; type: "tool_result"; tool: string; callId: string; output: string; status?: string }
   | { event: "message"; type: "status"; status: string }
   | { event: "message"; type: "usage"; usage: unknown };
 

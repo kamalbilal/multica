@@ -1,5 +1,6 @@
 import {
   Agent,
+  AgentBusyError,
   Cursor,
   type AgentOptions,
   type McpServerConfig,
@@ -30,6 +31,39 @@ const state: ExecutorState = {
   activeAgent: null,
   activeRun: null,
 };
+
+const RUN_WAIT_TIMEOUT_MS = 15_000;
+const RUN_WAIT_AFTER_CANCEL_MS = 2_000;
+const CANCEL_TIMEOUT_MS = 2_000;
+
+type ActiveExecuteControl = {
+  abort: () => void;
+};
+
+let activeExecuteControl: ActiveExecuteControl | null = null;
+
+function createAbortGate(): { signal: { aborted: boolean; wait: Promise<void> }; abort: () => void } {
+  let aborted = false;
+  let resolveWait: () => void = () => {};
+  const wait = new Promise<void>((resolve) => {
+    resolveWait = resolve;
+  });
+  return {
+    signal: {
+      get aborted() {
+        return aborted;
+      },
+      wait,
+    },
+    abort() {
+      if (aborted) {
+        return;
+      }
+      aborted = true;
+      resolveWait();
+    },
+  };
+}
 
 function resolveApiKey(apiKeyEnv?: string): string | undefined {
   const envName = apiKeyEnv ?? "CURSOR_API_KEY";
@@ -76,8 +110,135 @@ async function disposeAgent(agent: SDKAgent | null): Promise<void> {
   await agent[Symbol.asyncDispose]();
 }
 
+async function withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([
+      promise,
+      new Promise<never>((_, reject) => {
+        timer = setTimeout(() => reject(new Error(label)), ms);
+      }),
+    ]);
+  } finally {
+    if (timer !== undefined) {
+      clearTimeout(timer);
+    }
+  }
+}
+
+async function consumeRunStream(
+  run: Run,
+  emit: EmitFn,
+  abortSignal: { aborted: boolean; wait: Promise<void> },
+): Promise<void> {
+  const iterator = run.stream()[Symbol.asyncIterator]();
+  try {
+    while (!abortSignal.aborted) {
+      const next = await Promise.race([
+        iterator.next(),
+        abortSignal.wait.then(() => ({ done: true as const, value: undefined })),
+      ]);
+      if (next.done) {
+        break;
+      }
+      const mapped = mapSdkMessage(next.value);
+      if (mapped) {
+        emit(mapped);
+      }
+    }
+  } finally {
+    void iterator.return?.();
+  }
+}
+
+async function waitForRunResult(
+  run: Run,
+  aborted: boolean,
+): Promise<Awaited<ReturnType<Run["wait"]>>> {
+  const timeoutMs = aborted ? RUN_WAIT_AFTER_CANCEL_MS : RUN_WAIT_TIMEOUT_MS;
+  try {
+    return await withTimeout(run.wait(), timeoutMs, "run.wait timed out");
+  } catch (err) {
+    if (aborted) {
+      return {
+        id: run.id,
+        status: "cancelled",
+        result: "",
+      } as Awaited<ReturnType<Run["wait"]>>;
+    }
+    throw err instanceof Error ? err : new Error("run.wait timed out");
+  }
+}
+
+function isActiveRunStatus(status: string | undefined): boolean {
+  const normalized = String(status ?? "").toLowerCase();
+  return normalized === "running" || normalized === "creating";
+}
+
+function isAgentBusyError(err: unknown): boolean {
+  if (err instanceof AgentBusyError) {
+    return true;
+  }
+  const message = err instanceof Error ? err.message : String(err);
+  return /already has active run/i.test(message);
+}
+
+async function cancelLeftoverActiveRuns(agentId: string, cwd: string): Promise<void> {
+  let items: Run[] = [];
+  try {
+    const listed = await Agent.listRuns(agentId, { runtime: "local", cwd, limit: 20 });
+    items = listed.items ?? [];
+  } catch {
+    return;
+  }
+  for (const run of items) {
+    if (!isActiveRunStatus(run.status)) {
+      continue;
+    }
+    try {
+      if (run.supports("cancel")) {
+        await withTimeout(Promise.resolve(run.cancel()), CANCEL_TIMEOUT_MS, "leftover run.cancel timed out");
+      } else {
+        await withTimeout(
+          Agent.cancelRun(run.id, { runtime: "local", cwd }),
+          CANCEL_TIMEOUT_MS,
+          "leftover cancelRun timed out",
+        );
+      }
+    } catch {
+      // send() will surface AgentBusyError if the leftover run survived.
+    }
+  }
+}
+
+async function sendPrompt(agent: SDKAgent, cmd: ExecuteCommand, mcpServers: AgentOptions["mcpServers"]): Promise<Run> {
+  try {
+    return await agent.send(cmd.prompt, { mcpServers });
+  } catch (err) {
+    if (!cmd.agentId || !isAgentBusyError(err)) {
+      throw err;
+    }
+    await cancelLeftoverActiveRuns(cmd.agentId, cmd.cwd);
+    return await agent.send(cmd.prompt, { mcpServers });
+  }
+}
+
+async function cancelActiveRun(): Promise<void> {
+  const run = state.activeRun;
+  state.activeRun = null;
+  if (!run || !isActiveRunStatus(run.status)) {
+    return;
+  }
+  try {
+    await withTimeout(Promise.resolve(run.cancel()), CANCEL_TIMEOUT_MS, "run.cancel timed out");
+  } catch {
+    // Execute still emits the terminal result after the abort gate trips.
+  }
+}
+
 export async function handleExecute(cmd: ExecuteCommand, emit: EmitFn): Promise<void> {
   let agent: SDKAgent | null = null;
+  let settled = false;
   try {
     const apiKey = resolveApiKey(cmd.apiKeyEnv);
     if (!apiKey) {
@@ -95,24 +256,35 @@ export async function handleExecute(cmd: ExecuteCommand, emit: EmitFn): Promise<
     state.activeAgent = agent;
     emit({ event: "agent_id", agentId: agent.agentId });
 
-    const run = await agent.send(cmd.prompt, { mcpServers });
-    state.activeRun = run;
-
-    for await (const sdkEvent of run.stream()) {
-      const mapped = mapSdkMessage(sdkEvent);
-      if (mapped) {
-        emit(mapped);
-      }
+    if (cmd.agentId) {
+      await cancelLeftoverActiveRuns(agent.agentId, cmd.cwd);
     }
 
-    const result = await run.wait();
+    const run = await sendPrompt(agent, cmd, mcpServers);
+    state.activeRun = run;
+
+    const abortGate = createAbortGate();
+    activeExecuteControl = { abort: abortGate.abort };
+
+    await consumeRunStream(run, emit, abortGate.signal);
+    const cancelled = abortGate.signal.aborted;
+
+    const result = await waitForRunResult(run, cancelled);
+    const rawStatus = String(result.status ?? "");
+    const status =
+      rawStatus === "finished"
+        ? "completed"
+        : rawStatus === "canceled" || rawStatus === "cancelled" || cancelled
+          ? "cancelled"
+          : rawStatus;
     emit({
       event: "result",
-      status: result.status === "finished" ? "completed" : result.status,
+      status,
       output: result.result ?? "",
       usage: result.usage,
       error: result.error?.message,
     });
+    settled = true;
   } catch (err) {
     emit({
       event: "error",
@@ -120,7 +292,12 @@ export async function handleExecute(cmd: ExecuteCommand, emit: EmitFn): Promise<
       retryable: false,
     });
   } finally {
-    state.activeRun = null;
+    activeExecuteControl = null;
+    if (!settled) {
+      await cancelActiveRun();
+    } else {
+      state.activeRun = null;
+    }
     state.activeAgent = null;
     await disposeAgent(agent);
   }
@@ -149,14 +326,13 @@ export async function handleCancel(cmd: CancelCommand, emit: EmitFn): Promise<vo
     emit({ event: "error", message: "no active run to cancel", retryable: false });
     return;
   }
+  // Abort the execute stream first. run.cancel() can wait for the stream
+  // consumer, so awaiting it here deadlocks a hung local run.
+  activeExecuteControl?.abort();
   try {
-    await run.cancel();
-  } catch (err) {
-    emit({
-      event: "error",
-      message: err instanceof Error ? err.message : String(err),
-      retryable: false,
-    });
+    await withTimeout(Promise.resolve(run.cancel()), CANCEL_TIMEOUT_MS, "run.cancel timed out");
+  } catch {
+    // Execute still emits the terminal result after the abort gate trips.
   }
 }
 
@@ -217,7 +393,8 @@ export async function handleListModels(cmd: ListModelsCommand, emit: EmitFn): Pr
 }
 
 export async function handleShutdown(emit: EmitFn): Promise<void> {
-  state.activeRun = null;
+  activeExecuteControl?.abort();
+  await cancelActiveRun();
   const agent = state.activeAgent;
   state.activeAgent = null;
   await disposeAgent(agent);

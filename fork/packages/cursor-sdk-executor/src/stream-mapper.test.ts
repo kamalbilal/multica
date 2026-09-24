@@ -66,6 +66,7 @@ describe("mapSdkMessage", () => {
     expect(out?.type).toBe("tool_result");
     expect(out?.tool).toBe("grep");
     expect(out?.callId).toBe("c1");
+    expect(out?.status).toBe("completed");
   });
 
   it("maps status", () => {

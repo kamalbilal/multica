@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"os"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"time"
 )
@@ -16,12 +17,82 @@ const (
 	cursorSdkSandboxEnabledEnv   = "CURSOR_SDK_SANDBOX_ENABLED"
 	cursorSdkCustomToolsJSONEnv  = "CURSOR_SDK_CUSTOM_TOOLS_JSON"
 	cursorSdkDefaultAPIKeyEnv    = "CURSOR_API_KEY"
+	// After a successful `multica issue comment add`, wait this long with no
+	// further model activity before cancelling the SDK run. Immediate cancel
+	// treats a progress comment as the final deliverable and also drops a
+	// supplement that arrives while that comment is in flight.
+	cursorSdkCommentDeliveryIdleWait = 8 * time.Second
 )
 
 // cursorSdkBackend implements Backend by spawning the Node cursor-sdk executor
 // and mapping its JSONL IPC events onto agent.Message and Result.
 type cursorSdkBackend struct {
-	cfg Config
+	cfg             Config
+	commentIdleWait time.Duration
+}
+
+func (b *cursorSdkBackend) commentDeliveryIdleWait() time.Duration {
+	if b.commentIdleWait > 0 {
+		return b.commentIdleWait
+	}
+	return cursorSdkCommentDeliveryIdleWait
+}
+
+// commentDeliveryWatchdog cancels a hung SDK run after the last issue comment,
+// but only once the model has gone idle. New tokens, tools, or a steer reset
+// the timer so a progress comment plus more work can finish.
+type commentDeliveryWatchdog struct {
+	mu    sync.Mutex
+	timer *time.Timer
+	armed bool
+	fired atomic.Bool
+}
+
+func (w *commentDeliveryWatchdog) arm(idle time.Duration, fire func()) {
+	if idle <= 0 || fire == nil {
+		return
+	}
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	if w.fired.Load() {
+		return
+	}
+	w.armed = true
+	if w.timer == nil {
+		w.timer = time.AfterFunc(idle, func() {
+			if w.fired.CompareAndSwap(false, true) {
+				fire()
+			}
+		})
+		return
+	}
+	w.timer.Reset(idle)
+}
+
+func (w *commentDeliveryWatchdog) ping(idle time.Duration) {
+	if idle <= 0 {
+		return
+	}
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	if !w.armed || w.fired.Load() || w.timer == nil {
+		return
+	}
+	w.timer.Reset(idle)
+}
+
+func (w *commentDeliveryWatchdog) stop() {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	w.armed = false
+	if w.timer != nil {
+		w.timer.Stop()
+	}
+}
+
+func (w *commentDeliveryWatchdog) reset() {
+	w.stop()
+	w.fired.Store(false)
 }
 
 func (b *cursorSdkBackend) Execute(ctx context.Context, prompt string, opts ExecOptions) (*Session, error) {
@@ -42,11 +113,14 @@ func (b *cursorSdkBackend) Execute(ctx context.Context, prompt string, opts Exec
 	var runRunning atomic.Bool
 	reloadAfterMcpRefresh := opts.McpConfigRefreshed
 	var reloadedAfterMcpRefresh atomic.Bool
+	var commentWatchdog commentDeliveryWatchdog
+	idleWait := b.commentDeliveryIdleWait()
 
 	supplement := func(supplementCtx context.Context, instruction string) error {
 		if !runRunning.Load() {
 			return errors.New("cursor sdk run has not started")
 		}
+		commentWatchdog.ping(idleWait)
 		return client.Steer(supplementCtx, instruction)
 	}
 	supplementReady := func() bool {
@@ -58,6 +132,7 @@ func (b *cursorSdkBackend) Execute(ctx context.Context, prompt string, opts Exec
 		defer close(msgCh)
 		defer close(resCh)
 		defer runRunning.Store(false)
+		defer commentWatchdog.stop()
 		defer func() {
 			if err := client.Close(); err != nil {
 				b.cfg.Logger.Warn("cursor sdk executor close failed", "error", err)
@@ -79,6 +154,8 @@ func (b *cursorSdkBackend) Execute(ctx context.Context, prompt string, opts Exec
 		resumeSessionForBackfill := strings.TrimSpace(opts.ResumeSessionID)
 		var execErr error
 		var sdkResult CursorSdkResult
+		var issueCommentCallIDs sync.Map
+		var deliveryCompleted atomic.Bool
 
 		for attempt := 0; attempt < 2; attempt++ {
 			output.Reset()
@@ -88,6 +165,8 @@ func (b *cursorSdkBackend) Execute(ctx context.Context, prompt string, opts Exec
 			finalStatus = "completed"
 			finalError = ""
 			runRunning.Store(false)
+			deliveryCompleted.Store(false)
+			commentWatchdog.reset()
 
 			req, buildErr := buildCursorSdkExecuteRequest(turnPrompt, attemptOpts, b.cfg.Env)
 			if buildErr != nil {
@@ -115,6 +194,28 @@ func (b *cursorSdkBackend) Execute(ctx context.Context, prompt string, opts Exec
 						if msg.Type == MessageStatus && msg.Status == "running" {
 							runRunning.Store(true)
 						}
+						if msg.Type == MessageToolUse && msg.CallID != "" && isMulticaIssueCommentAddTool(msg) {
+							issueCommentCallIDs.Store(msg.CallID, struct{}{})
+						}
+						if msg.Type == MessageToolResult && msg.CallID != "" {
+							if _, tracked := issueCommentCallIDs.LoadAndDelete(msg.CallID); tracked && multicaIssueCommentAddToolSucceeded(msg) {
+								b.cfg.Logger.Info("cursor sdk posted issue comment; waiting for idle before ending turn", "call_id", msg.CallID, "idle", idleWait)
+								commentWatchdog.arm(idleWait, func() {
+									deliveryCompleted.Store(true)
+									b.cfg.Logger.Info("cursor sdk ending turn after issue comment idle", "call_id", msg.CallID)
+									// Cancel the SDK run so the next issue comment can resume
+									// this agent. Killing immediately leaves Cursor with an
+									// active run and the follow-up fails with AgentBusyError.
+									if err := client.CancelThenKillIfStuck(cursorSdkCommentDeliveryEndWait); err != nil {
+										b.cfg.Logger.Warn("cursor sdk end after issue comment delivery failed", "error", err)
+									}
+								})
+							} else {
+								commentWatchdog.ping(idleWait)
+							}
+						} else {
+							commentWatchdog.ping(idleWait)
+						}
 						if msg.Type == MessageText {
 							output.WriteString(msg.Content)
 						}
@@ -127,6 +228,7 @@ func (b *cursorSdkBackend) Execute(ctx context.Context, prompt string, opts Exec
 					}
 				}
 			})
+			commentWatchdog.stop()
 
 			if execErr == nil {
 				resultSeen = true
@@ -176,11 +278,19 @@ func (b *cursorSdkBackend) Execute(ctx context.Context, prompt string, opts Exec
 		}
 
 		duration := time.Since(startTime)
+		if deliveryCompleted.Load() {
+			finalStatus = "completed"
+			finalError = ""
+			execErr = nil
+		}
 		if execErr != nil {
 			switch {
 			case runCtx.Err() == context.DeadlineExceeded:
 				finalStatus = "timeout"
 				finalError = fmt.Sprintf("cursor sdk timed out after %s", timeout)
+			case runCtx.Err() == context.Canceled && deliveryCompleted.Load():
+				finalStatus = "completed"
+				finalError = ""
 			case runCtx.Err() == context.Canceled:
 				finalStatus = "aborted"
 				finalError = "execution cancelled"
@@ -302,6 +412,7 @@ func cursorSdkMessageFromEvent(evt CursorSdkEvent) (Message, bool) {
 			Tool:   evt.Tool,
 			CallID: evt.CallID,
 			Output: evt.Output,
+			Status: evt.Status,
 		}, true
 	case "status":
 		return Message{Type: MessageStatus, Status: evt.Status}, true
@@ -312,11 +423,23 @@ func cursorSdkMessageFromEvent(evt CursorSdkEvent) (Message, bool) {
 	}
 }
 
+func cursorSdkToolResultSucceeded(msg Message) bool {
+	switch strings.ToLower(strings.TrimSpace(msg.Status)) {
+	case "failed", "error", "cancelled", "canceled", "aborted":
+		return false
+	default:
+		return true
+	}
+}
+
 func cursorSdkIsResumeError(err error) bool {
 	if err == nil {
 		return false
 	}
 	lower := strings.ToLower(err.Error())
+	if strings.Contains(lower, "already has active run") {
+		return true
+	}
 	if strings.Contains(lower, "agent not found") {
 		return true
 	}

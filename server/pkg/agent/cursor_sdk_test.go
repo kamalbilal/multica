@@ -11,6 +11,25 @@ import (
 	"log/slog"
 )
 
+func mustCursorSdkBackend(t *testing.T, script string, idle time.Duration) *cursorSdkBackend {
+	t.Helper()
+	backend, err := New("cursor_sdk", Config{
+		ExecutablePath: script,
+		Logger:         slog.Default(),
+	})
+	if err != nil {
+		t.Fatalf("New(cursor_sdk): %v", err)
+	}
+	sdk, ok := backend.(*cursorSdkBackend)
+	if !ok {
+		t.Fatalf("New(cursor_sdk) returned %T", backend)
+	}
+	if idle > 0 {
+		sdk.commentIdleWait = idle
+	}
+	return sdk
+}
+
 const mappingCursorSdkExecutorScript = `
 const readline = require("node:readline");
 
@@ -464,6 +483,351 @@ func TestCursorSdkReloadAfterMcpRefresh(t *testing.T) {
 	}
 	if result.Output != "reloaded" {
 		t.Fatalf("output = %q, want reloaded", result.Output)
+	}
+}
+
+const deliveryCursorSdkExecutorScript = `
+const readline = require("node:readline");
+
+let finishExecute = null;
+
+const rl = readline.createInterface({ input: process.stdin, crlfDelay: Infinity });
+
+function emit(event) {
+  process.stdout.write(JSON.stringify(event) + "\n");
+}
+
+rl.on("line", (line) => {
+  const trimmed = line.trim();
+  if (!trimmed) {
+    return;
+  }
+
+  let cmd;
+  try {
+    cmd = JSON.parse(trimmed);
+  } catch {
+    return;
+  }
+
+  switch (cmd.cmd) {
+    case "execute":
+      emit({ event: "agent_id", agentId: "agent-delivery-test" });
+      emit({ event: "message", type: "status", status: "running" });
+      emit({
+        event: "message",
+        type: "tool_use",
+        tool: "terminal",
+        callId: "call-comment",
+        input: { command: "multica issue comment add issue-1 --content-file ./reply.md" },
+      });
+      emit({
+        event: "message",
+        type: "tool_result",
+        tool: "terminal",
+        callId: "call-comment",
+        output: '{"status":"success","value":{"exitCode":0,"stderr":"Comment added.\\n"}}',
+      });
+      finishExecute = () => {
+        emit({
+          event: "result",
+          status: "cancelled",
+          output: "",
+        });
+      };
+      break;
+    case "cancel":
+      if (finishExecute) {
+        finishExecute();
+        finishExecute = null;
+      }
+      break;
+    case "shutdown":
+      rl.close();
+      process.exit(0);
+      break;
+    default:
+      break;
+  }
+});
+`
+
+func TestCursorSdkCompletesAfterIssueCommentDelivery(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	script := filepath.Join(dir, "delivery-cursor-sdk-executor.js")
+	if err := os.WriteFile(script, []byte(deliveryCursorSdkExecutorScript), 0o644); err != nil {
+		t.Fatalf("write delivery executor: %v", err)
+	}
+
+	backend := mustCursorSdkBackend(t, script, 20*time.Millisecond)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	session, err := backend.Execute(ctx, "do work", ExecOptions{
+		Cwd:   t.TempDir(),
+		Model: "composer-2",
+	})
+	if err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+
+	result, ok := readSessionResult(session.Result, 5*time.Second)
+	if !ok {
+		t.Fatal("timed out waiting for cursor sdk delivery result")
+	}
+	if result.Status != "completed" {
+		t.Fatalf("status = %q, want completed (error=%q)", result.Status, result.Error)
+	}
+}
+
+const hungAfterCommentCursorSdkExecutorScript = `
+const readline = require("node:readline");
+const rl = readline.createInterface({ input: process.stdin, crlfDelay: Infinity });
+function emit(event) { process.stdout.write(JSON.stringify(event) + "\n"); }
+rl.on("line", (line) => {
+  const cmd = JSON.parse(line.trim());
+  switch (cmd.cmd) {
+    case "execute":
+      emit({ event: "agent_id", agentId: "agent-hung-comment" });
+      emit({ event: "message", type: "status", status: "running" });
+      emit({
+        event: "message",
+        type: "tool_use",
+        tool: "shell",
+        callId: "call-comment",
+        input: {
+          command: "cd \"C:\\\\Users\\\\kamal\\\\work\\\\workdir\"; multica issue comment add issue-1 --content-file ./reply.md --output table; if ($LASTEXITCODE -eq 0) { Remove-Item ./reply.md }",
+        },
+      });
+      emit({
+        event: "message",
+        type: "tool_result",
+        tool: "shell",
+        callId: "call-comment",
+        output: '{"status":"success","value":{"exitCode":0,"stderr":"Comment added to issue issue-1.\\n"}}',
+      });
+      break;
+    case "cancel":
+    case "shutdown":
+      break;
+    default:
+      break;
+  }
+});
+`
+
+func TestCursorSdkCompletesWhenExecutorIgnoresCancelAfterComment(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	script := filepath.Join(dir, "hung-comment-cursor-sdk-executor.js")
+	if err := os.WriteFile(script, []byte(hungAfterCommentCursorSdkExecutorScript), 0o644); err != nil {
+		t.Fatalf("write hung executor: %v", err)
+	}
+
+	backend := mustCursorSdkBackend(t, script, 20*time.Millisecond)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+
+	session, err := backend.Execute(ctx, "do work", ExecOptions{
+		Cwd:   t.TempDir(),
+		Model: "composer-2",
+	})
+	if err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+
+	result, ok := readSessionResult(session.Result, 15*time.Second)
+	if !ok {
+		t.Fatal("timed out waiting for cursor sdk to complete after hung executor")
+	}
+	if result.Status != "completed" {
+		t.Fatalf("status = %q, want completed (error=%q)", result.Status, result.Error)
+	}
+}
+
+const continueAfterCommentCursorSdkExecutorScript = `
+const readline = require("node:readline");
+const rl = readline.createInterface({ input: process.stdin, crlfDelay: Infinity });
+function emit(event) { process.stdout.write(JSON.stringify(event) + "\n"); }
+let cancelled = false;
+rl.on("line", (line) => {
+  const cmd = JSON.parse(line.trim());
+  switch (cmd.cmd) {
+    case "execute":
+      emit({ event: "agent_id", agentId: "agent-continue-comment" });
+      emit({ event: "message", type: "status", status: "running" });
+      emit({
+        event: "message",
+        type: "tool_use",
+        tool: "terminal",
+        callId: "call-progress",
+        input: { command: "multica issue comment add issue-1 --content-file ./progress.md" },
+      });
+      emit({
+        event: "message",
+        type: "tool_result",
+        tool: "terminal",
+        callId: "call-progress",
+        output: '{"status":"success","value":{"exitCode":0,"stderr":"Comment added.\\n"}}',
+      });
+      setTimeout(() => {
+        if (cancelled) {
+          return;
+        }
+        emit({ event: "message", type: "assistant", content: "now the actual list" });
+        emit({ event: "result", status: "completed", output: "now the actual list" });
+      }, 80);
+      break;
+    case "cancel":
+      cancelled = true;
+      emit({ event: "result", status: "cancelled", output: "" });
+      break;
+    case "shutdown":
+      rl.close();
+      process.exit(0);
+      break;
+    default:
+      break;
+  }
+});
+`
+
+func TestCursorSdkContinuesAfterProgressComment(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	script := filepath.Join(dir, "continue-comment-cursor-sdk-executor.js")
+	if err := os.WriteFile(script, []byte(continueAfterCommentCursorSdkExecutorScript), 0o644); err != nil {
+		t.Fatalf("write continue executor: %v", err)
+	}
+
+	backend := mustCursorSdkBackend(t, script, 0)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	session, err := backend.Execute(ctx, "do work", ExecOptions{
+		Cwd:   t.TempDir(),
+		Model: "composer-2",
+	})
+	if err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+
+	result, ok := readSessionResult(session.Result, 5*time.Second)
+	if !ok {
+		t.Fatal("timed out waiting for cursor sdk to continue after progress comment")
+	}
+	if result.Status != "completed" {
+		t.Fatalf("status = %q, want completed (error=%q)", result.Status, result.Error)
+	}
+	if !strings.Contains(result.Output, "now the actual list") {
+		t.Fatalf("output = %q, want the work that continued after the progress comment", result.Output)
+	}
+}
+
+const steerAfterCommentCursorSdkExecutorScript = `
+const readline = require("node:readline");
+const rl = readline.createInterface({ input: process.stdin, crlfDelay: Infinity });
+function emit(event) { process.stdout.write(JSON.stringify(event) + "\n"); }
+let cancelled = false;
+let finish = null;
+rl.on("line", (line) => {
+  const cmd = JSON.parse(line.trim());
+  switch (cmd.cmd) {
+    case "execute":
+      emit({ event: "agent_id", agentId: "agent-steer-after-comment" });
+      emit({ event: "message", type: "status", status: "running" });
+      emit({
+        event: "message",
+        type: "tool_use",
+        tool: "terminal",
+        callId: "call-progress",
+        input: { command: "multica issue comment add issue-1 --content-file ./progress.md" },
+      });
+      emit({
+        event: "message",
+        type: "tool_result",
+        tool: "terminal",
+        callId: "call-progress",
+        output: '{"status":"success","value":{"exitCode":0,"stderr":"Comment added.\\n"}}',
+      });
+      finish = () => {
+        if (cancelled) {
+          return;
+        }
+        emit({ event: "message", type: "assistant", content: "steered after comment" });
+        emit({ event: "result", status: "completed", output: "steered after comment" });
+      };
+      break;
+    case "steer":
+      if (finish) {
+        setTimeout(finish, 20);
+      }
+      break;
+    case "cancel":
+      cancelled = true;
+      emit({ event: "result", status: "cancelled", output: "" });
+      break;
+    case "shutdown":
+      rl.close();
+      process.exit(0);
+      break;
+    default:
+      break;
+  }
+});
+`
+
+func TestCursorSdkSteerAfterCommentKeepsTurnAlive(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	script := filepath.Join(dir, "steer-after-comment-cursor-sdk-executor.js")
+	if err := os.WriteFile(script, []byte(steerAfterCommentCursorSdkExecutorScript), 0o644); err != nil {
+		t.Fatalf("write steer-after-comment executor: %v", err)
+	}
+
+	backend := mustCursorSdkBackend(t, script, 300*time.Millisecond)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	session, err := backend.Execute(ctx, "do work", ExecOptions{
+		Cwd:                  t.TempDir(),
+		Model:                "composer-2",
+		EnableTaskSupplement: true,
+	})
+	if err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+
+	deadline := time.Now().Add(3 * time.Second)
+	for !session.SupplementReady() {
+		if time.Now().After(deadline) {
+			t.Fatal("timed out waiting for supplement-ready cursor sdk run")
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+
+	if err := session.Supplement(ctx, "horror"); err != nil {
+		t.Fatalf("Supplement: %v", err)
+	}
+
+	result, ok := readSessionResult(session.Result, 5*time.Second)
+	if !ok {
+		t.Fatal("timed out waiting for cursor sdk result after steer")
+	}
+	if result.Status != "completed" {
+		t.Fatalf("status = %q, want completed (error=%q)", result.Status, result.Error)
+	}
+	if !strings.Contains(result.Output, "steered after comment") {
+		t.Fatalf("output = %q, want steered work after the progress comment", result.Output)
 	}
 }
 

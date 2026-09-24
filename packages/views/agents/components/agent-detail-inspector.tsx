@@ -12,6 +12,7 @@ import {
   AGENT_MAX_CONCURRENT_TASKS_MAX,
   AGENT_MAX_CONCURRENT_TASKS_MIN,
 } from "@multica/core/agents";
+import { api } from "@multica/core/api";
 import {
   cursorSdkModelDiscoveryEnv,
   isRuntimeUsableForUser,
@@ -123,12 +124,20 @@ export function AgentDetailInspector({
     runtime != null && isRuntimeUsableForUser(runtime, currentUserId);
   const canDiscoverRuntimeModels = isOnline && canReadRuntime;
   const nameInvalid = name.trim().length === 0;
+  const shouldLoadAgentEnv =
+    runtime?.provider === "cursor_sdk" && Boolean(agent.has_custom_env);
+  const agentEnvQuery = useQuery({
+    queryKey: ["agent-env", agent.id],
+    queryFn: () => api.getAgentEnv(agent.id),
+    enabled: shouldLoadAgentEnv,
+    staleTime: 60_000,
+  });
   const modelDiscoveryEnv = useMemo(
     () =>
       runtime?.provider === "cursor_sdk"
-        ? cursorSdkModelDiscoveryEnv(agent.custom_env)
+        ? cursorSdkModelDiscoveryEnv(agentEnvQuery.data?.custom_env)
         : undefined,
-    [agent.custom_env, runtime?.provider],
+    [agentEnvQuery.data?.custom_env, runtime?.provider],
   );
 
   // Same query the Thinking / Speed fields already use, so switching model

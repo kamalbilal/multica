@@ -22,6 +22,26 @@ if [ "$node_major" -lt 22 ]; then
   exit 0
 fi
 
+verify_cursor_sdk_executor_deps() {
+  if [ ! -f "$EXECUTOR_DIR/node_modules/@cursor/sdk/package.json" ]; then
+    return 1
+  fi
+  (cd "$EXECUTOR_DIR" && node --input-type=module -e "import '@cursor/sdk'" >/dev/null 2>&1)
+}
+
 echo "==> Building cursor_sdk executor..." >&2
-(cd "$EXECUTOR_DIR" && npm ci --silent && npm run build --silent)
+(
+  cd "$EXECUTOR_DIR"
+  npm ci --silent
+  if ! verify_cursor_sdk_executor_deps; then
+    echo "cursor_sdk: @cursor/sdk install incomplete; retrying npm ci..." >&2
+    rm -rf node_modules
+    npm ci --silent
+    verify_cursor_sdk_executor_deps || {
+      echo "cursor_sdk executor dependencies are broken after npm ci (missing @cursor/sdk). Run 'npm ci' in $EXECUTOR_DIR and retry." >&2
+      exit 1
+    }
+  fi
+  npm run build --silent
+)
 printf '%s\n' "$EXECUTOR_SCRIPT"

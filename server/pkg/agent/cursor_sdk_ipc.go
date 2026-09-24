@@ -13,6 +13,7 @@ import (
 	"strings"
 	"sync"
 	"sync/atomic"
+	"time"
 )
 
 const cursorSdkExecutorEnv = "MULTICA_CURSOR_SDK_EXECUTOR"
@@ -542,6 +543,51 @@ func (c *CursorSdkClient) MessagesList(ctx context.Context, req CursorSdkMessage
 	}
 }
 
+// cursorSdkCommentDeliveryEndWait is long enough for the executor to abort
+// the stream, cancel the SDK run, and emit a result before we kill it.
+const cursorSdkCommentDeliveryEndWait = 6 * time.Second
+
+// Kill forcibly terminates the executor process so Execute can unblock.
+func (c *CursorSdkClient) Kill() error {
+	if c.cmd == nil || c.cmd.Process == nil {
+		return errors.New("cursor sdk executor process is not running")
+	}
+	return c.cmd.Process.Kill()
+}
+
+// CancelThenKillIfStuck asks the executor to cancel the active SDK run, then
+// kills the process if Execute does not finish within wait.
+func (c *CursorSdkClient) CancelThenKillIfStuck(wait time.Duration) error {
+	if wait <= 0 {
+		wait = cursorSdkCommentDeliveryEndWait
+	}
+	cancelErr := c.Cancel(context.Background())
+
+	c.executeMu.Lock()
+	execDone := c.execDone
+	c.executeMu.Unlock()
+	if execDone == nil {
+		return cancelErr
+	}
+
+	timer := time.NewTimer(wait)
+	defer timer.Stop()
+	select {
+	case <-execDone:
+		return cancelErr
+	case <-timer.C:
+		c.logger.Warn("cursor sdk killing executor after issue comment cancel wait", "wait", wait)
+		killErr := c.Kill()
+		if cancelErr != nil {
+			if killErr != nil {
+				return fmt.Errorf("cancel: %v; kill: %w", cancelErr, killErr)
+			}
+			return cancelErr
+		}
+		return killErr
+	}
+}
+
 // Close shuts down the executor process.
 func (c *CursorSdkClient) Close() error {
 	var closeErr error
@@ -553,8 +599,25 @@ func (c *CursorSdkClient) Close() error {
 		closeErr = err
 	}
 
-	if c.cmd != nil && c.cmd.Process != nil {
-		if waitErr := c.cmd.Wait(); waitErr != nil && closeErr == nil {
+	waitDone := make(chan error, 1)
+	go func() {
+		if c.cmd == nil {
+			waitDone <- nil
+			return
+		}
+		waitDone <- c.cmd.Wait()
+	}()
+
+	select {
+	case waitErr := <-waitDone:
+		if waitErr != nil && closeErr == nil {
+			closeErr = waitErr
+		}
+	case <-time.After(2 * time.Second):
+		if err := c.Kill(); err != nil && closeErr == nil {
+			closeErr = err
+		}
+		if waitErr := <-waitDone; waitErr != nil && closeErr == nil {
 			closeErr = waitErr
 		}
 	}

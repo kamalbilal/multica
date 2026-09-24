@@ -182,6 +182,8 @@ func TestTaskSupplementNegotiationFailsClosed(t *testing.T) {
 		{name: "claude old daemon", provider: "claude", daemonAdvertises: false, wantCapabilityRow: false},
 		{name: "old daemon", provider: "codex", daemonAdvertises: false, wantCapabilityRow: false},
 		{name: "unsupported runtime", provider: "kimi", daemonAdvertises: true, wantCapabilityRow: false},
+		{name: "cursor_sdk negotiated", provider: "cursor_sdk", daemonAdvertises: true, wantCapabilityRow: true},
+		{name: "cursor_sdk old daemon", provider: "cursor_sdk", daemonAdvertises: false, wantCapabilityRow: false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			fixture := newSupplementFixture(t, tc.provider, "dispatched", false)
