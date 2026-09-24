@@ -3,19 +3,13 @@
 import { composeAnnotatedReply, EMPTY_REPLY_ANNOTATIONS, hasReplyIntent } from "@multica/core/drafts/reply-annotation";
 import { ReplyAnnotations } from "./reply-annotations";
 import { useRef, useState, useEffect, useMemo } from "react";
-import { useQuery } from "@tanstack/react-query";
-import { MessageSquarePlus } from "lucide-react";
-import { toast } from "sonner";
 import { ContentEditor, type ContentEditorRef, useFileDropZone, FileDropOverlay, useLazyEditor, useUploadGate, useComposerSubmit } from "../../editor";
 import { FileUploadButton } from "@multica/ui/components/common/file-upload-button";
 import { SubmitButton } from "@multica/ui/components/common/submit-button";
 import { Button } from "@multica/ui/components/ui/button";
 import { ActorAvatar } from "../../common/actor-avatar";
-import { dispatchReasonCode, errorCode } from "@multica/core/api";
 import { contentReferencesAttachment, type AgentTask } from "@multica/core/types";
 import { formatShortcut, useShortcut } from "@multica/core/shortcuts";
-import { useCreateTaskSupplement } from "@multica/core/issues/mutations";
-import { issueTasksOptions } from "@multica/core/issues/queries";
 import { useCommentDraftStore, type CommentDraftKey } from "@multica/core/issues/stores";
 import { cn } from "@multica/ui/lib/utils";
 import type { AvatarSize } from "@multica/ui/lib/avatar-size";
@@ -27,7 +21,6 @@ import { SteerAttachmentNotice } from "./steer-attachment-notice";
 import { useStopRunsBeforeSend } from "./use-stop-runs-before-send";
 import { useCommentUploads } from "./use-comment-uploads";
 import { useQuickActionMenu } from "../hooks/use-quick-action-menu";
-import { canSendRunningTurnGuidance, selectRunningTurnGuidanceTask } from "./running-turn-guidance";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -80,17 +73,6 @@ function ReplyInput({
   const { t: tEditor } = useT("editor");
   const sendShortcut = useShortcut("send");
   const placeholderText = placeholder ?? t(($) => $.reply.placeholder);
-  const { data: issueTasks } = useQuery(issueTasksOptions(issueId));
-  const runningGuidanceTask = useMemo(
-    () => selectRunningTurnGuidanceTask(issueTasks),
-    [issueTasks],
-  );
-  const [guidanceEnabled, setGuidanceEnabled] = useState(false);
-  const supplement = useCreateTaskSupplement(issueId);
-
-  useEffect(() => {
-    if (!runningGuidanceTask) setGuidanceEnabled(false);
-  }, [runningGuidanceTask]);
   const editorRef = useRef<ContentEditorRef>(null);
   const composerRef = useRef<HTMLDivElement>(null);
   // See CommentInput — replying mid-upload posts without the file.
@@ -210,35 +192,6 @@ function ReplyInput({
       // Bind only uploads the body still references (see CommentInput):
       // deleting an inline image really unbinds it; close-surviving uploads
       // are written back into the body by the settle handler.
-      if (guidanceEnabled && runningGuidanceTask) {
-        if (!canSendRunningTurnGuidance(runningGuidanceTask)) {
-          toast.error(t(($) => $.inline_run.supplement_forbidden));
-          return Promise.resolve(false);
-        }
-        return supplement
-          .mutateAsync({
-            taskId: runningGuidanceTask.id,
-            content,
-            clientRequestId: crypto.randomUUID(),
-          })
-          .then((comment) => {
-            acceptedCommentIdRef.current = comment.id;
-            return true;
-          })
-          .catch((error: unknown) => {
-            const code = dispatchReasonCode(error) ?? errorCode(error);
-            toast.error(
-              code === "task_supplement_turn_ended"
-                ? t(($) => $.inline_run.supplement_ended)
-                : code === "task_supplement_unsupported"
-                  ? t(($) => $.inline_run.supplement_unsupported)
-                  : code === "invocation_not_allowed"
-                    ? t(($) => $.inline_run.supplement_forbidden)
-                    : t(($) => $.inline_run.supplement_failed),
-            );
-            return false;
-          });
-      }
       const activeIds = pendingAttachments
         .filter((a) => contentReferencesAttachment(content, a))
         .map((a) => a.id);
@@ -365,21 +318,6 @@ function ReplyInput({
           />
         </div>
         <div className="absolute bottom-0 right-0 flex items-center gap-1">
-          {runningGuidanceTask ? (
-            <Button
-              type="button"
-              variant={guidanceEnabled ? "brand" : "ghost"}
-              size="icon-xs"
-              aria-pressed={guidanceEnabled}
-              aria-label={t(($) => $.inline_run.supplement_placeholder)}
-              title={t(($) => $.inline_run.supplement_placeholder)}
-              data-testid="reply-guidance-toggle"
-              className={guidanceEnabled ? undefined : "text-muted-foreground"}
-              onClick={() => setGuidanceEnabled((enabled) => !enabled)}
-            >
-              <MessageSquarePlus className="h-3.5 w-3.5" />
-            </Button>
-          ) : null}
           <FileUploadButton
             size="sm"
             multiple

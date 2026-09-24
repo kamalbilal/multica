@@ -27,7 +27,6 @@ const apiRenderQuickAction = vi.hoisted(() => vi.fn());
 const apiPreviewCommentTriggers = vi.hoisted(() => vi.fn());
 const apiListTasksByIssue = vi.hoisted(() => vi.fn());
 const apiCancelTask = vi.hoisted(() => vi.fn());
-const apiCreateTaskSupplement = vi.hoisted(() => vi.fn());
 const uploadWithToast = vi.hoisted(() => vi.fn());
 const editorDefaultValues = vi.hoisted(() => ({
   values: [] as Array<string | undefined>,
@@ -66,7 +65,6 @@ vi.mock("@multica/core/api", () => ({
     previewCommentTriggers: apiPreviewCommentTriggers,
     listTasksByIssue: apiListTasksByIssue,
     cancelTask: apiCancelTask,
-    createTaskSupplement: apiCreateTaskSupplement,
   },
   dispatchReasonCode: () => undefined,
   errorCode: () => undefined,
@@ -296,7 +294,6 @@ beforeEach(() => {
   apiListTasksByIssue.mockReset();
   apiListTasksByIssue.mockResolvedValue([]);
   apiCancelTask.mockReset();
-  apiCreateTaskSupplement.mockReset();
   insertMarkdownSpy.mockReset();
   insertPlaceholderSpy.mockReset();
   insertMarkdownBehavior.succeed = true;
@@ -1327,80 +1324,5 @@ describe.each(["reply", "description"])("annotations in %s drafts", (source) => 
     act(() => { useCommentDraftStore.getState().addAnnotation(draftKey, { ...annotation, id: "b", quote: "Another point" }); });
     await act(async () => accept("reply-new"));
     expect(useCommentDraftStore.getState().getAnnotations(draftKey)).toHaveLength(2);
-  });
-});
-
-describe("reply running-turn guidance toggle", () => {
-  const runningTask = {
-    id: "task-1",
-    issue_id: "issue-1",
-    agent_id: "agent-1",
-    status: "running",
-    created_at: "2026-09-24T00:00:00Z",
-    started_at: "2026-09-24T00:01:00Z",
-  };
-
-  it("does not show a guidance toggle on Leave a comment", () => {
-    apiListTasksByIssue.mockResolvedValue([runningTask]);
-    renderCommentInput();
-    expect(screen.queryByTestId("reply-guidance-toggle")).toBeNull();
-    expect(screen.queryByText("Add guidance for this running turn")).toBeNull();
-  });
-
-  it("places an icon-only toggle before the reply attach control while a turn is running", async () => {
-    apiListTasksByIssue.mockResolvedValue([runningTask]);
-    const { container } = renderReplyInput();
-    const toggle = await screen.findByTestId("reply-guidance-toggle");
-    const attach = screen.getByRole("button", { name: "Attach file" });
-    expect(toggle).toHaveAttribute("aria-pressed", "false");
-    expect(toggle.compareDocumentPosition(attach) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
-    expect(toggle.textContent).toBe("");
-    expect(screen.queryByText("Add guidance for this running turn")).toBeNull();
-    expect(container.querySelectorAll("button")).toHaveLength(3);
-  });
-
-  it("sends a normal reply when the toggle is off", async () => {
-    apiListTasksByIssue.mockResolvedValue([runningTask]);
-    const { container, onSubmit } = renderReplyInput();
-    await screen.findByTestId("reply-guidance-toggle");
-    activateComposer("reply-composer-shell");
-    fireEvent.change(screen.getByTestId("editor"), { target: { value: "normal reply" } });
-    fireEvent.click(getSubmitButton(container));
-    await waitFor(() => {
-      expect(onSubmit).toHaveBeenCalledWith("normal reply", undefined, undefined);
-    });
-    expect(apiCreateTaskSupplement).not.toHaveBeenCalled();
-  });
-
-  it("sends guidance instead of a reply when the toggle is on", async () => {
-    apiListTasksByIssue.mockResolvedValue([runningTask]);
-    apiCreateTaskSupplement.mockResolvedValue({
-      id: "sup-1",
-      author_type: "member",
-      author_id: "user-1",
-      content: "steer this",
-      parent_id: "comment-1",
-      type: "comment",
-      reactions: [],
-      attachments: [],
-      created_at: "2026-09-24T00:02:00Z",
-      updated_at: "2026-09-24T00:02:00Z",
-    });
-    const { container, onSubmit } = renderReplyInput();
-    const toggle = await screen.findByTestId("reply-guidance-toggle");
-    fireEvent.click(toggle);
-    expect(toggle).toHaveAttribute("aria-pressed", "true");
-    activateComposer("reply-composer-shell");
-    fireEvent.change(screen.getByTestId("editor"), { target: { value: "steer this" } });
-    fireEvent.click(getSubmitButton(container));
-    await waitFor(() => {
-      expect(apiCreateTaskSupplement).toHaveBeenCalledWith(
-        "issue-1",
-        "task-1",
-        "steer this",
-        expect.any(String),
-      );
-    });
-    expect(onSubmit).not.toHaveBeenCalled();
   });
 });
