@@ -39,8 +39,8 @@ import { Button } from "@multica/ui/components/ui/button";
 import { ResizablePanelGroup, ResizablePanel, ResizableHandle } from "@multica/ui/components/ui/resizable";
 import { Sheet, SheetContent } from "@multica/ui/components/ui/sheet";
 import { useIsMobile } from "@multica/ui/hooks/use-mobile";
-import { ContentEditor, type ContentEditorRef, TitleEditor, type TitleEditorRef, useFileDropZone, FileDropOverlay, useLazyEditor, useEditorUpload, ImageSequenceProvider } from "../../editor";
-import { collectImageSequence, type ImageSequenceBlock } from "@multica/core/attachments/image-sequence";
+import { ContentEditor, type ContentEditorRef, TitleEditor, type TitleEditorRef, useFileDropZone, FileDropOverlay, useLazyEditor, useEditorUpload, PreviewSequenceProvider, collectPreviewSequence } from "../../editor";
+import type { ImageSequenceBlock } from "@multica/core/attachments/image-sequence";
 import { FileUploadButton } from "@multica/ui/components/common/file-upload-button";
 import {
   Tooltip,
@@ -64,7 +64,7 @@ import { PropertyIcon } from "../../common/property-icon";
 import type { Attachment, Issue, IssueProperty, IssueStatus, IssueStatusCategory, IssuePriority, TimelineEntry, UpdateIssueRequest } from "@multica/core/types";
 import { contentReferencesAttachment } from "@multica/core/types";
 import { isBuiltInIssueStatus } from "@multica/core/issue-statuses";
-import { commentLandingTarget } from "@multica/core/issues/comment-deletion";
+import { commentLandingTarget, isDeletedComment } from "@multica/core/issues/comment-deletion";
 import { formatDateOnly, isPastDateOnly } from "@multica/core/issues/date";
 import { useUpdateIssue } from "@multica/core/issues/mutations";
 import { toast } from "sonner";
@@ -103,7 +103,7 @@ import { ExecutionLogSection } from "./execution-log-section";
 import { WakeupsSection } from "./wakeups-section";
 import { QuickActionsSection } from "./quick-actions-section";
 import { PluginPanelSection } from "../../plugins";
-import { PullRequestList } from "./pull-request-list";
+import { PullRequestsSection } from "./pull-requests-section";
 import { useGitHubSettings } from "@multica/core/github";
 import { useQuery } from "@tanstack/react-query";
 import { useAuthStore } from "@multica/core/auth";
@@ -120,6 +120,7 @@ import { propertyListOptions } from "@multica/core/properties";
 import { memberListOptions, agentListOptions } from "@multica/core/workspace/queries";
 import {
   selectExpandedResolved,
+  useCommentCollapseStore,
   useRecentIssuesStore,
   useResolvedExpandStore,
   useSubIssuesCollapseStore,
@@ -308,10 +309,22 @@ function formatActivity(
     case "created":
       return t(($) => $.activity.created);
     case "status_changed":
+      // PR auto-complete (MUL-7429) says why the status moved.
+      if (details.source === "pr_automation") {
+        return t(($) => $.activity.status_changed_pr, {
+          from: statusLabel(details.from ?? "?", t, resolveStatusLabel),
+          to: statusLabel(details.to ?? "?", t, resolveStatusLabel),
+          prs: details.pull_requests ?? "",
+        });
+      }
       return t(($) => $.activity.status_changed, {
         from: statusLabel(details.from ?? "?", t, resolveStatusLabel),
         to: statusLabel(details.to ?? "?", t, resolveStatusLabel),
       });
+    case "pr_auto_complete_changed":
+      return (entry.details as { disabled?: unknown } | undefined)?.disabled === true
+        ? t(($) => $.activity.pr_auto_complete_disabled)
+        : t(($) => $.activity.pr_auto_complete_enabled);
     case "priority_changed":
       return t(($) => $.activity.priority_changed, {
         from: priorityLabel(details.from ?? "?", t),
@@ -1741,12 +1754,16 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
       items.flatMap((it) => {
         if (it.kind === "activity-group" || !it.entry) return [];
         const replies = timelineView.threadReplies.get(it.id) ?? EMPTY_REPLIES;
+        const resolution = deriveThreadResolution(it.entry, replies);
         return [
           {
             id: it.id,
             entry: it.entry,
-            resolved: deriveThreadResolution(it.entry, replies).kind !== "none",
+            resolved: resolution.kind !== "none",
             participants: collectThreadParticipants(it.entry, replies),
+            // Tombstones render no row, so they get no tick either.
+            replies: replies.filter((reply) => !isDeletedComment(reply)),
+            resolutionReplyId: resolution.kind === "reply" ? resolution.resolutionId : null,
           },
         ];
       }),
@@ -1866,6 +1883,78 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
       flashJumpTarget(threadId);
     },
     [isFlatTimeline, items, jumpToComment, flashJumpTarget],
+  );
+  // Minimap jump to a reply. A reply's anchor exists only while its thread is
+  // open, so first undo whatever hides it — the reader's own collapse, a root
+  // resolution folding the whole thread into a bar, or a reply resolution
+  // folding the other replies — then mount the thread and let the effect
+  // below align the reply once its row lands.
+  const [pendingReplyJump, setPendingReplyJump] = useState<{ replyId: string; rootId: string } | null>(null);
+  const jumpToReply = useCallback(
+    (replyId: string) => {
+      const rootId = replyToRoot.get(replyId);
+      const index = rootId ? items.findIndex((it) => it.id === rootId) : -1;
+      const rootItem = items[index];
+      const root = rootItem && rootItem.kind !== "activity-group" ? rootItem.entry : undefined;
+      if (!rootId || !root) return;
+      const collapse = useCommentCollapseStore.getState();
+      if (collapse.isCollapsed(id, rootId)) collapse.toggle(id, rootId);
+      if (!expandedResolved.has(rootId)) {
+        const resolution = deriveThreadResolution(root, timelineView.threadReplies.get(rootId) ?? EMPTY_REPLIES);
+        if (resolution.kind === "root" || (resolution.kind === "reply" && resolution.resolutionId !== replyId)) {
+          toggleResolvedExpand(rootId, true);
+        }
+      }
+      if (!isFlatTimeline) virtuosoRef.current?.scrollToIndex({ index, align: "start", offset: -16 });
+      setPendingReplyJump({ replyId, rootId });
+    },
+    [id, items, replyToRoot, expandedResolved, timelineView.threadReplies, toggleResolvedExpand, isFlatTimeline],
+  );
+  // Land the pending reply once its row is in the DOM. The expansion commits
+  // on the next render and Virtuoso mounts the thread a frame or two later, so
+  // wait by frame (~1s cap), then re-align until async layout (markdown, code
+  // highlight, images) settles. Drive scrollTop directly — never native
+  // scrollIntoView (#3929) — and clear any sticky thread bar pinned at the top
+  // of the viewport so it cannot cover the reply's header.
+  useEffect(() => {
+    const container = scrollContainerEl;
+    if (!pendingReplyJump || !container) return;
+    const { replyId, rootId } = pendingReplyJump;
+    let rafId = 0;
+    let frames = 0;
+    let last = -1;
+    const align = () => {
+      const el = document.getElementById(`comment-${replyId}`);
+      if (!el) {
+        if (++frames < 60) rafId = requestAnimationFrame(align);
+        else setPendingReplyJump(null);
+        return;
+      }
+      const stickyBar = document
+        .getElementById(`comment-${rootId}`)
+        ?.querySelector<HTMLElement>("[data-thread-sticky-bar]");
+      const c = container.getBoundingClientRect();
+      const e = el.getBoundingClientRect();
+      const target = Math.max(
+        0,
+        container.scrollTop + (e.top - c.top) - 16 - (stickyBar?.offsetHeight ?? 0),
+      );
+      container.scrollTop = target;
+      if (Math.abs(target - last) > 1 && ++frames < 90) {
+        last = target;
+        rafId = requestAnimationFrame(align);
+        return;
+      }
+      flashJumpTarget(replyId);
+      setPendingReplyJump(null);
+    };
+    rafId = requestAnimationFrame(align);
+    return () => cancelAnimationFrame(rafId);
+  }, [pendingReplyJump, scrollContainerEl, flashJumpTarget]);
+  const jumpToMinimapTarget = useCallback(
+    (commentId: string) =>
+      replyToRoot.has(commentId) ? jumpToReply(commentId) : jumpToThread(commentId),
+    [replyToRoot, jumpToReply, jumpToThread],
   );
 
   const {
@@ -2146,19 +2235,28 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
     [issueAttachments, descPendingAttachments],
   );
 
-  // Every image in this issue, in the order the page renders them: the
-  // description first, then each timeline comment with its thread replies
+  // Every previewable file in this issue, in the order the page renders them:
+  // the description first, then each timeline comment with its thread replies
   // nested under it (MUL-5752). Built from `items` rather than the flat
   // timeline so a reply sits next to the root it renders under, and from data
   // rather than the DOM because Virtuoso only mounts the visible window.
   //
   // A resolved thread that is currently collapsed still contributes its
-  // images: they belong to the issue and are one click from being on screen,
+  // files: they belong to the issue and are one click from being on screen,
   // so leaving them out would make the counter change depending on which
   // threads happen to be folded.
-  const imageSequence = useMemo(() => {
+  //
+  // The description renders no standalone cards, and its attachment list is
+  // the whole issue's (comment uploads keep `issue_id`) — it only resolves the
+  // description's own references, or every comment file would be counted at
+  // the description's position.
+  const previewSequence = useMemo(() => {
     const blocks: ImageSequenceBlock[] = [
-      { content: issue?.description, attachments: descEditorAttachments },
+      {
+        content: issue?.description,
+        attachments: descEditorAttachments,
+        standalone: false,
+      },
     ];
     for (const item of items) {
       if (item.kind === "activity-group" || !item.entry) continue;
@@ -2170,7 +2268,7 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
         blocks.push({ content: reply.content, attachments: reply.attachments });
       }
     }
-    return collectImageSequence(blocks);
+    return collectPreviewSequence(blocks);
   }, [issue?.description, descEditorAttachments, items, timelineView.threadReplies]);
 
   const handleDescriptionUpload = useCallback(
@@ -2664,17 +2762,12 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
           (or the GitHub master switch is off). Backend data is kept either
           way so re-enabling restores the section instantly. */}
       {githubSettings.prSidebar && (
-        <div>
-          <button
-            type="button"
-            className={`flex w-full items-center gap-1 rounded-md px-2 py-1 text-caption font-medium transition-colors mb-2 hover:bg-accent/70 ${pullRequestsOpen ? "" : "text-muted-foreground hover:text-foreground"}`}
-            onClick={() => setPullRequestsOpen(!pullRequestsOpen)}
-          >
-            {t(($) => $.detail.section_pull_requests)}
-            <ChevronRight className={`!size-3 shrink-0 stroke-[2.5] text-muted-foreground transition-transform ${pullRequestsOpen ? "rotate-90" : ""}`} />
-          </button>
-          {pullRequestsOpen && <div className="pl-2"><PullRequestList issueId={id} /></div>}
-        </div>
+        <PullRequestsSection
+          issueId={id}
+          identifier={issue.identifier}
+          open={pullRequestsOpen}
+          onOpenChange={setPullRequestsOpen}
+        />
       )}
 
       {/* Execution log — active runs + collapsed past runs, each carrying its
@@ -2866,11 +2959,11 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
       : [];
 
   const detailContent = (
-    // Hosts the one image viewer this issue's images page through — see
-    // ImageSequenceProvider. Wraps the whole column so the description
-    // editor's images and the timeline's images share one sequence.
+    // Hosts the one viewer this issue's files page through — see
+    // PreviewSequenceProvider. Wraps the whole column so the description
+    // editor's files and the timeline's files share one sequence.
     <CurrentIssueRenderContextProvider value={currentIssueRenderContext}>
-    <ImageSequenceProvider items={imageSequence}>
+    <PreviewSequenceProvider items={previewSequence}>
     <div className="relative flex h-full min-w-0 flex-1 flex-col">
         {/* In-page find bar — floats over the top-right of the content column
             (below the breadcrumb header), outside the scroll container so it
@@ -3608,18 +3701,18 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
             column's px-8 padding when the gutter is 0 (overlay scrollbars),
             so it covers neither the scrollbar nor body text. It also clears
             the resize handle's 4px drag strip at the panel edge. Hover
-            previews a thread, click jumps to it. Hidden on mobile: no
+            previews a comment, click jumps to it. Hidden on mobile: no
             hover, and the gutter is too tight. */}
         {!isMobile && (
           <ThreadMinimap
             threads={minimapThreads}
             scrollContainerEl={scrollContainerEl}
-            onJump={jumpToThread}
+            onJump={jumpToMinimapTarget}
             className="absolute bottom-0 right-3 top-12"
           />
         )}
       </div>
-    </ImageSequenceProvider>
+    </PreviewSequenceProvider>
     </CurrentIssueRenderContextProvider>
   );
 

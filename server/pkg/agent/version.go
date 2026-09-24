@@ -139,6 +139,10 @@ func SupportsTaskSupplement(provider, version string) bool {
 		minimum = "2.1.110"
 	case "cursor_sdk":
 		return true
+	case "grok":
+		// Grok Build 1.0.14 supports atomic delivery of in-turn interjections
+		// through its x.ai/interject ACP extension.
+		minimum = "1.0.14"
 	default:
 		return false
 	}

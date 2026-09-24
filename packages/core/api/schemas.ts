@@ -46,7 +46,7 @@ import type {
   RedeemTelegramBindingTokenResponse,
   GroupedIssuesResponse,
   GitHubConnectResponse,
-  GitHubPullRequest,
+  IssuePullRequestsResponse,
   InboxItem,
   InboxWorkspaceUnread,
   Label,
@@ -409,6 +409,7 @@ export const GitHubPullRequestSchema = z.object({
   closed_at: z.string().nullable(),
   pr_created_at: z.string(),
   pr_updated_at: z.string(),
+  link_source: z.enum(["manual", "title", "branch", "auto"]).optional().catch(undefined),
   mergeable: z.string().nullable().optional(),
   merge_state_status: z.string().nullable().optional(),
   snapshot_available: z.boolean().optional(),
@@ -428,12 +429,23 @@ export const GitHubPullRequestSchema = z.object({
   changed_files: z.number().optional().default(0),
 }).loose();
 
-export const IssuePullRequestsResponseSchema = z.object({
-  pull_requests: z.array(GitHubPullRequestSchema).default([]),
+// A malformed auto_complete block degrades to null (the issue page shows no
+// automation line) instead of discarding the PR list with it.
+export const PRAutoCompleteSchema = z.object({
+  state: z.string(),
+  pull_request_ids: z.array(z.string()).default([]),
+  issue_disabled: z.boolean().default(false),
+  workspace_enabled: z.boolean().default(true),
 }).loose();
 
-export const EMPTY_ISSUE_PULL_REQUESTS_RESPONSE: { pull_requests: GitHubPullRequest[] } = {
+export const IssuePullRequestsResponseSchema = z.object({
+  pull_requests: z.array(GitHubPullRequestSchema).default([]),
+  auto_complete: PRAutoCompleteSchema.nullable().optional().default(null).catch(null),
+}).loose();
+
+export const EMPTY_ISSUE_PULL_REQUESTS_RESPONSE: IssuePullRequestsResponse = {
   pull_requests: [],
+  auto_complete: null,
 };
 
 // Label responses are consumed by settings tables and resource pickers. Keep
@@ -900,6 +912,22 @@ export const EMPTY_ATTACHMENT: Attachment = {
 // wasn't updated in lock-step. `.loose()` removes that synchronisation
 // hazard — the schema validates the shape it knows about and leaves the
 // rest alone.
+// One receipt per running turn a comment steered. A malformed receipt is
+// dropped on its own rather than failing the whole comment.
+const CommentSupplementReceiptSchema = z.object({
+  task_id: z.string(),
+  agent_id: z.string().optional().catch(undefined),
+  status: z.enum(["pending", "delivering", "delivered", "failed"]),
+  failure_reason: z.string().optional().catch(undefined),
+  delivered_at: z.string().optional().catch(undefined),
+});
+
+const CommentSupplementReceiptsSchema = z.array(z.unknown()).optional().catch(undefined)
+  .transform((raw) => raw?.flatMap((item) => {
+    const parsed = CommentSupplementReceiptSchema.safeParse(item);
+    return parsed.success ? [parsed.data] : [];
+  }));
+
 const TimelineEntrySchema = z.object({
   type: z.string(),
   id: z.string(),
@@ -918,6 +946,7 @@ const TimelineEntrySchema = z.object({
   reactions: z.array(ReactionSchema).optional(),
   attachments: z.array(AttachmentSchema).optional(),
   source_task_id: z.string().nullable().optional(),
+  supplements: CommentSupplementReceiptsSchema,
   supplement_task_id: z.string().optional().catch(undefined),
   supplement_status: z.enum(["pending", "delivering", "delivered", "failed"]).optional().catch(undefined),
   supplement_failure_reason: z.string().optional().catch(undefined),
@@ -1067,6 +1096,7 @@ export const CommentSchema = z.object({
   updated_at: z.string(),
   revision: z.number().int().positive().optional(),
   source_task_id: z.string().nullable().optional(),
+  supplements: CommentSupplementReceiptsSchema,
   supplement_task_id: z.string().optional().catch(undefined),
   supplement_status: z.enum(["pending", "delivering", "delivered", "failed"]).optional().catch(undefined),
   supplement_failure_reason: z.string().optional().catch(undefined),
