@@ -12,7 +12,7 @@ import { renderWithI18n } from "../../test/i18n";
 // rules live in packages/core/issues/comment-deletion.test.ts.
 
 vi.mock("@multica/core/api", () => ({
-  api: { uploadFile: vi.fn(), listTasksByIssue: vi.fn().mockResolvedValue([]), createTaskSupplement: vi.fn() },
+  api: { uploadFile: vi.fn(), listTasksByIssue: vi.fn().mockResolvedValue([]) },
   dispatchReasonCode: () => undefined,
   errorCode: () => undefined,
 }));

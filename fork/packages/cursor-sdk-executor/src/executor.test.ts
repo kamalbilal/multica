@@ -77,7 +77,7 @@ vi.mock("@cursor/sdk", () => {
 });
 
 import { AgentBusyError } from "@cursor/sdk";
-import { dispatchCommand, handleCancel, handleExecute, handleSteer } from "./executor.js";
+import { asMcpConfig, dispatchCommand, handleCancel, handleExecute, handleSteer } from "./executor.js";
 
 describe("executor", () => {
   beforeEach(() => {
@@ -135,6 +135,37 @@ describe("executor", () => {
         error: undefined,
       },
     ]);
+  });
+
+  it("unwraps Claude-style mcpServers documents before Agent.create", async () => {
+    const mockRun = createMockRun();
+    const mockAgent = createMockAgent();
+    mockSend.mockResolvedValue(mockRun);
+    mockCreate.mockResolvedValue(mockAgent);
+
+    await handleExecute(
+      {
+        cmd: "execute",
+        id: "req-mcp",
+        prompt: "use tools",
+        cwd: "/tmp/workdir",
+        model: "composer-2.5",
+        mcpConfig: {
+          mcpServers: {
+            fetch: { command: "uvx", args: ["mcp-server-fetch"] },
+          },
+        },
+      },
+      () => {},
+    );
+
+    expect(mockCreate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        mcpServers: {
+          fetch: { command: "uvx", args: ["mcp-server-fetch"] },
+        },
+      }),
+    );
   });
 
   it("execute resumes when agentId is provided", async () => {
@@ -421,5 +452,40 @@ describe("executor", () => {
         ],
       },
     ]);
+  });
+});
+
+describe("asMcpConfig", () => {
+  it("unwraps mcpServers and mcp wrappers", () => {
+    expect(
+      asMcpConfig({
+        mcpServers: { fetch: { command: "uvx" } },
+        mcp: { legacy: { url: "https://example.test/mcp" } },
+      }),
+    ).toEqual({
+      legacy: { url: "https://example.test/mcp" },
+      fetch: { command: "uvx" },
+    });
+  });
+
+  it("lets mcpServers win over a same-named mcp entry", () => {
+    expect(
+      asMcpConfig({
+        mcpServers: { shared: { command: "canonical" } },
+        mcp: { shared: { command: "legacy" } },
+      }),
+    ).toEqual({ shared: { command: "canonical" } });
+  });
+
+  it("passes through an already unwrapped name map", () => {
+    expect(asMcpConfig({ fetch: { command: "uvx" } })).toEqual({
+      fetch: { command: "uvx" },
+    });
+  });
+
+  it("returns undefined for empty documents", () => {
+    expect(asMcpConfig(undefined)).toBeUndefined();
+    expect(asMcpConfig({})).toBeUndefined();
+    expect(asMcpConfig({ mcpServers: {} })).toBeUndefined();
   });
 });

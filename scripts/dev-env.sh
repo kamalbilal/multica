@@ -832,14 +832,28 @@ EOF
   chmod 600 "$config"
 }
 
+# True when the bearer can access the given workspace (member list includes id).
+workspace_id_accessible() {
+  local server=$1 pat=$2 ws=$3
+  [ -n "$ws" ] || return 1
+  curl -sf --max-time 5 "$server/api/workspaces" -H "Authorization: Bearer $pat" | node -e '
+    const want = process.argv[1];
+    let list;
+    try { list = JSON.parse(require("fs").readFileSync(0, "utf8")); } catch { process.exit(1); }
+    const ok = (Array.isArray(list) ? list : []).some((w) => w && w.id === want);
+    process.exit(ok ? 0 : 1);
+  ' "$ws"
+}
+
 ensure_credentials() {
   local server="http://localhost:${BACKEND_PORT}" config="$PROFILE_DIR/config.json"
   local code="${MULTICA_DEV_VERIFICATION_CODE:-$DEV_CODE_DEFAULT}"
-  local verify jwt pat ws
+  local verify jwt pat ws preferred_ws=""
 
   if [ -f "$config" ]; then
     pat="$(json_field "$(cat "$config")" token || true)"
     ws="$(json_field "$(cat "$config")" workspace_id || true)"
+    preferred_ws="$ws"
     if [ -n "$pat" ] && curl -sf --max-time 5 "$server/api/me" -H "Authorization: Bearer $pat" >/dev/null 2>&1; then
       WORKSPACE_ID="$ws"
       write_profile_config "$config" "$pat" "$ws"
@@ -850,7 +864,11 @@ ensure_credentials() {
 
   curl -sf -X POST "$server/auth/send-code" -H 'Content-Type: application/json' \
     -d "{\"email\":\"${DEV_EMAIL}\"}" >/dev/null \
-    || die "send-code failed. Is MULTICA_DEV_VERIFICATION_CODE set and APP_ENV non-production?"
+    || die "send-code failed for ${DEV_EMAIL}. Is MULTICA_DEV_VERIFICATION_CODE set and APP_ENV non-production?
+If you restored a database from another Multica instance, use your real account instead:
+  just login
+Then run:
+  just repair"
 
   verify="$(curl -sS -X POST "$server/auth/verify-code" -H 'Content-Type: application/json' \
     -d "{\"email\":\"${DEV_EMAIL}\",\"code\":\"${code}\"}")"
@@ -863,6 +881,14 @@ Do not retry immediately — repeated attempts lock the code. Wait ~40s and re-r
     -H 'Content-Type: application/json' -d '{"name":"dev-env","expires_in_days":365}')"
   pat="$(json_field "$pat_response" token || true)"
   [ -n "$pat" ] || die "Personal access token creation failed: $pat_response"
+
+  if [ -n "$preferred_ws" ] && workspace_id_accessible "$server" "$pat" "$preferred_ws"; then
+    ws="$preferred_ws"
+    write_profile_config "$config" "$pat" "$ws"
+    WORKSPACE_ID="$ws"
+    ok "Refreshed CLI token for profile $PROFILE (kept workspace $ws)"
+    return 0
+  fi
 
   local ws_response
   ws_response="$(curl -sS -X POST "$server/api/workspaces" -H "Authorization: Bearer $pat" \
@@ -1258,7 +1284,58 @@ bind_paths() {
   if [ ! -x "$MULTICA_BIN" ] && [ -x "$REPO_ROOT/server/bin/multica" ]; then
     MULTICA_BIN="$REPO_ROOT/server/bin/multica"
   fi
+  if [ ! -x "$MULTICA_BIN" ] && [ -x "${MULTICA_BIN}.exe" ]; then
+    MULTICA_BIN="${MULTICA_BIN}.exe"
+  fi
   mkdir -p "$LOG_DIR"
+}
+
+# Refresh the checkout CLI profile (new PAT) and restart the agent daemon.
+# Use after a database restore or when heartbeats fail with invalid token.
+cmd_repair_cli() {
+  local name="${1:-}"
+
+  resolve_env_for_read "$name"
+  load_env_file "$ENV_FILE" "$DIR"
+  export PORT="$BACKEND_PORT" FRONTEND_PORT DATABASE_URL POSTGRES_DB="$DB_NAME"
+
+  step "Repair CLI + daemon ($PROFILE)"
+  curl -sf --max-time 10 "http://localhost:${BACKEND_PORT}/health" >/dev/null 2>&1 \
+    || die "API is not up on :${BACKEND_PORT}. Run 'just up' (or 'just setup') first."
+
+  if [ "$COMPONENT_RUN_MODE" != production ]; then
+    ensure_dev_code "$ENV_FILE"
+  fi
+  ensure_cursor_sdk_executor "$ENV_FILE"
+
+  stop_component daemon || true
+  start_daemon
+
+  printf '\n%s✓ CLI profile %s repaired; daemon should show online in the app.%s\n' "$C_GREEN" "$PROFILE" "$C_OFF"
+  printf '  App     http://localhost:%s\n' "$FRONTEND_PORT"
+  printf '  Profile %s\n' "$PROFILE_DIR/config.json"
+}
+
+# Interactive browser login for this checkout's CLI profile (restored DBs, real accounts).
+cmd_login_cli() {
+  local name="${1:-}"
+
+  resolve_env_for_read "$name"
+  load_env_file "$ENV_FILE" "$DIR"
+  export PORT="$BACKEND_PORT" FRONTEND_PORT DATABASE_URL POSTGRES_DB="$DB_NAME"
+
+  step "CLI login ($PROFILE)"
+  curl -sf --max-time 10 "http://localhost:${BACKEND_PORT}/health" >/dev/null 2>&1 \
+    || die "API is not up on :${BACKEND_PORT}. Run 'just up' first."
+
+  info "Building $MULTICA_BIN if needed."
+  (cd "$REPO_ROOT/server" && go build -o bin/multica ./cmd/multica) || die "Failed to build the multica CLI."
+  if [ ! -x "$MULTICA_BIN" ] && [ -x "${MULTICA_BIN}.exe" ]; then
+    MULTICA_BIN="${MULTICA_BIN}.exe"
+  fi
+
+  "${CLEAN_ENV[@]}" MULTICA_WORKSPACES_ROOT="$WORKSPACES_ROOT" \
+    "$MULTICA_BIN" login --profile "$PROFILE"
 }
 
 save_manifest() {
@@ -1686,9 +1763,15 @@ Local development environments: named, listable, deletable.
   dev-env.sh destroy [name] [--yes]
   dev-env.sh gc      [--dry-run]
   dev-env.sh exec    [name] -- <command> [args...]
+  dev-env.sh repair-cli [name]
+  dev-env.sh login-cli  [name]
 
 Components: api (Go backend), web (Next.js), daemon (agent daemon),
 desktop (Electron). Anything selected implies api.
+
+repair-cli re-issues the dev PAT for this checkout's profile (keeping the
+configured workspace when possible) and restarts the daemon. Requires a
+running API.
 
 down keeps the database, the CLI profile and the allocated slot.
 destroy consumes them.
@@ -1706,6 +1789,8 @@ main() {
     destroy) cmd_destroy "$@" ;;
     gc) cmd_gc "$@" ;;
     exec) cmd_exec "$@" ;;
+    repair-cli) cmd_repair_cli "$@" ;;
+    login-cli) cmd_login_cli "$@" ;;
     ""|-h|--help|help) usage ;;
     *) usage >&2; exit 2 ;;
   esac

@@ -6,8 +6,10 @@
 # Git Bash registry used by `make up` (/c/Users/...), not WSL (/mnt/c/...).
 #
 # List recipes:  just --list
-# First time:    just build          (compile server + Next.js)
+# First time:    just setup          (build, start stack, refresh CLI + daemon)
 # Start stack:   just up             (production binaries, not dev servers)
+# Restored DB:      just login          (browser sign-in), then just repair
+# Dev auto-auth:    just repair         (new PAT + restart daemon)
 # Full recycle:  just refresh        (stop, then start again)
 # Status:        just status
 #
@@ -91,3 +93,32 @@ list:
 [windows]
 list:
     powershell -NoProfile -ExecutionPolicy Bypass -File "{{root}}\scripts\just-dev-env.ps1" -Action list
+
+# Re-issue the checkout CLI token and restart the agent daemon (no browser login).
+[unix]
+repair:
+    bash "{{root}}/scripts/dev-env.sh" repair-cli
+
+[windows]
+repair:
+    powershell -NoProfile -ExecutionPolicy Bypass -File "{{root}}\scripts\just-dev-env.ps1" -Action repair
+
+# Sign in via browser and update this checkout's CLI profile (use after a DB restore).
+[unix]
+login:
+    bash "{{root}}/scripts/dev-env.sh" login-cli
+
+[windows]
+login:
+    powershell -NoProfile -ExecutionPolicy Bypass -File "{{root}}\scripts\just-dev-env.ps1" -Action login
+
+# Build, start api+web+daemon, then repair CLI auth — typical fork bootstrap / post-restore.
+[unix]
+setup:
+    bash "{{root}}/scripts/just-build.sh"
+    bash "{{root}}/scripts/dev-env.sh" up --production --components {{components}}
+    bash "{{root}}/scripts/dev-env.sh" repair-cli
+
+[windows]
+setup:
+    powershell -NoProfile -ExecutionPolicy Bypass -File "{{root}}\scripts\just-dev-env.ps1" -Action setup

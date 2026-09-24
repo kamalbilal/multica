@@ -58,6 +58,8 @@ import {
   SquadSchema,
   SourceContextPreviewSchema,
   TimelineEntriesSchema,
+  CommentSchema,
+  EMPTY_COMMENT,
   UserSchema,
   PluginInstallationSchema,
   PluginInstallationListResponseSchema,
@@ -560,6 +562,26 @@ describe("TimelineEntriesSchema", () => {
     });
   });
 
+  it("keeps two supplement receipts and drops a malformed one", () => {
+    const parsed = TimelineEntriesSchema.parse([{
+      type: "comment",
+      id: "steer-1",
+      actor_type: "member",
+      actor_id: "user-1",
+      created_at: "2026-01-01T00:00:00Z",
+      content: "Only fix web.",
+      supplements: [
+        { task_id: "task-1", agent_id: "agent-1", status: "pending" },
+        { task_id: 1, status: "pending" },
+        { task_id: "task-2", agent_id: "agent-2", status: "pending" },
+      ],
+    }]);
+    expect(parsed[0]?.supplements).toEqual([
+      { task_id: "task-1", agent_id: "agent-1", status: "pending" },
+      { task_id: "task-2", agent_id: "agent-2", status: "pending" },
+    ]);
+  });
+
   it("preserves source_task_id for agent failure comments", () => {
     const parsed = TimelineEntriesSchema.parse([
       {
@@ -628,6 +650,46 @@ describe("TimelineEntriesSchema", () => {
 
     expect(parsed).toHaveLength(1);
     expect(parsed[0]?.deleted_at).toBeUndefined();
+  });
+});
+
+describe("CommentSchema", () => {
+  const baseComment = {
+    id: "comment-1",
+    issue_id: "issue-1",
+    author_type: "member",
+    author_id: "user-1",
+    content: "Only fix web.",
+    type: "comment",
+    parent_id: null,
+    created_at: "2026-01-01T00:00:00Z",
+    updated_at: "2026-01-01T00:00:00Z",
+  };
+
+  it("keeps two supplement receipts and drops a malformed one", () => {
+    const parsed = CommentSchema.parse({
+      ...baseComment,
+      supplements: [
+        { task_id: "task-1", agent_id: "agent-1", status: "pending" },
+        { task_id: 1, status: "pending" },
+        { task_id: "task-2", agent_id: "agent-2", status: "pending" },
+      ],
+      supplement_task_id: "task-1",
+      supplement_status: "pending",
+    });
+    expect(parsed.supplements).toEqual([
+      { task_id: "task-1", agent_id: "agent-1", status: "pending" },
+      { task_id: "task-2", agent_id: "agent-2", status: "pending" },
+    ]);
+    expect(parsed.supplement_task_id).toBe("task-1");
+    expect(parsed.supplement_status).toBe("pending");
+  });
+
+  it("parseWithFallback returns EMPTY_COMMENT for a missing id", () => {
+    const { id: _id, ...withoutId } = baseComment;
+    expect(parseWithFallback(withoutId, CommentSchema, EMPTY_COMMENT, {
+      endpoint: "POST /api/issues/:id/comments",
+    })).toEqual(EMPTY_COMMENT);
   });
 });
 

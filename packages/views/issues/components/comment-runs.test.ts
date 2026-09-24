@@ -491,6 +491,23 @@ describe("orderThreadWithRuns", () => {
       .toEqual(["ask", "run:first", "run:second ↩ ask", "later"]);
   });
 
+  it("keeps a retry after a failed attempt on the same input while it is still working", () => {
+    const root = comment("root", { created_at: at("10:00:00") });
+    const failed = asked("failed", root, {
+      status: "failed",
+      started_at: at("10:00:10"),
+      completed_at: at("10:00:53"),
+    });
+    const retry = asked("retry", root, {
+      status: "running",
+      created_at: at("10:01:00"),
+      started_at: at("10:01:00"),
+    });
+    expect(thread([failed, retry], [root])).toEqual(["run:failed", "run:retry ↩ root"]);
+    expect(thread([failed, retry], [root, answer("answer", retry, at("10:10:00"))]))
+      .toEqual(["run:failed", "answer ↩ root"]);
+  });
+
   // MUL-7548 kept one run's comments together at its latest one; each now
   // reads at its own time, so a comment written in between stays between.
   it("places each comment a run posts at its own time", () => {

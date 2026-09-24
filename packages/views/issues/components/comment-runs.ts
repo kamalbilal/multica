@@ -282,8 +282,9 @@ export interface ThreadRunSlot {
  * written after it (MUL-7628). A run's slot is its latest comment. A run
  * still working with nothing posted stays right after the input it answers
  * — the latest one it covers — the way an active standalone run keeps its
- * enqueue slot (MUL-7632). A run whose reply is the root heads the thread
- * instead.
+ * enqueue slot (MUL-7632). A retry of that input parks after earlier attempts
+ * on the same comment so the waiting card does not jump once it replies
+ * (MUL-7692). A run whose reply is the root heads the thread instead.
  */
 export function orderThreadWithRuns(
   root: TimelineEntry,

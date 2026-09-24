@@ -1543,7 +1543,7 @@ export class ApiClient {
     suppressAgentIds?: string[],
     steerTaskIds?: string[],
   ): Promise<Comment> {
-    return this.fetch(`/api/issues/${issueId}/comments`, {
+    const raw = await this.fetch<unknown>(`/api/issues/${issueId}/comments`, {
       method: "POST",
       body: JSON.stringify({
         content,
@@ -1553,6 +1553,9 @@ export class ApiClient {
         ...(suppressAgentIds?.length ? { suppress_agent_ids: suppressAgentIds } : {}),
         ...(steerTaskIds?.length ? { steer_task_ids: steerTaskIds } : {}),
       }),
+    });
+    return parseWithFallback(raw, CommentSchema, EMPTY_COMMENT, {
+      endpoint: "POST /api/issues/:id/comments",
     });
   }
 

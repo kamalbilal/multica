@@ -94,13 +94,24 @@ function buildAgentOptions(cmd: ExecuteCommand, apiKey: string): AgentOptions {
   };
 }
 
-function asMcpConfig(
+function isObjectRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+// Multica stores Claude-style documents `{ mcpServers: { name: config } }`.
+// Cursor SDK AgentOptions.mcpServers is the inner name→config map. Passing the
+// wrapper makes the SDK treat "mcpServers" as a server name and fail with
+// `Invalid inline MCP server config for "mcpServers"`.
+export function asMcpConfig(
   mcpConfig?: Record<string, unknown>,
 ): Record<string, McpServerConfig> | undefined {
   if (!mcpConfig) {
     return undefined;
   }
-  return mcpConfig as Record<string, McpServerConfig>;
+  const canonical = isObjectRecord(mcpConfig.mcpServers) ? mcpConfig.mcpServers : undefined;
+  const legacy = isObjectRecord(mcpConfig.mcp) ? mcpConfig.mcp : undefined;
+  const servers = canonical || legacy ? { ...legacy, ...canonical } : mcpConfig;
+  return Object.keys(servers).length > 0 ? (servers as Record<string, McpServerConfig>) : undefined;
 }
 
 async function disposeAgent(agent: SDKAgent | null): Promise<void> {

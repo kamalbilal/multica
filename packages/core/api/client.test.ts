@@ -1458,6 +1458,77 @@ describe("ApiClient", () => {
     ]);
   });
 
+  it("posts steer_task_ids and keeps supplement receipts from the create response", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({
+        id: "comment-1",
+        issue_id: "issue-1",
+        author_type: "member",
+        author_id: "user-1",
+        content: "Only fix web.",
+        type: "comment",
+        parent_id: null,
+        reactions: [],
+        attachments: [],
+        created_at: "2026-06-05T00:00:00Z",
+        updated_at: "2026-06-05T00:00:00Z",
+        supplements: [
+          { task_id: "task-1", agent_id: "agent-1", status: "pending" },
+          { task_id: 1, status: "pending" },
+          { task_id: "task-2", agent_id: "agent-2", status: "pending" },
+        ],
+        supplement_task_id: "task-1",
+        supplement_status: "pending",
+      }), {
+        status: 201,
+        headers: { "Content-Type": "application/json" },
+      }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const client = new ApiClient("https://api.example.test");
+    const comment = await client.createComment(
+      "issue-1",
+      "Only fix web.",
+      "comment",
+      "parent-1",
+      undefined,
+      undefined,
+      ["task-1", "task-2"],
+    );
+
+    expect(fetchMock.mock.calls[0]?.[1]?.body).toBe(JSON.stringify({
+      content: "Only fix web.",
+      type: "comment",
+      parent_id: "parent-1",
+      steer_task_ids: ["task-1", "task-2"],
+    }));
+    expect(comment.supplements).toEqual([
+      { task_id: "task-1", agent_id: "agent-1", status: "pending" },
+      { task_id: "task-2", agent_id: "agent-2", status: "pending" },
+    ]);
+    expect(comment.supplement_task_id).toBe("task-1");
+  });
+
+  it("falls back to an empty comment when the create response shape drifts", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue(
+        new Response(JSON.stringify({ id: 42, content: "hello" }), {
+          status: 201,
+          headers: { "Content-Type": "application/json" },
+        }),
+      ),
+    );
+
+    const client = new ApiClient("https://api.example.test");
+    await expect(client.createComment("issue-1", "hello")).resolves.toMatchObject({
+      id: "",
+      issue_id: "",
+      content: "",
+    });
+  });
+
   it("uses the Cloud Runtime node API contract", async () => {
     const node = {
       id: "node-1",

@@ -110,6 +110,7 @@ Use the CLI provider when you only need basic headless runs. Use SDK when you ne
 | --- | --- |
 | `cursor_sdk` not in probe list | Node missing, Node < 22, or executor script not built |
 | `missing CURSOR_API_KEY` | Key not in daemon env or agent custom env |
+| `Invalid inline MCP server config for "mcpServers"` | Executor received the Claude-style `{ mcpServers: {…} }` wrapper as a fake server name. Rebuild/restart the daemon so it uses an executor that unwraps that document. |
 | Resume fails with `Agent … not found` | Workdir changed or was deleted; SDK keys agents by `cwd` |
 | Empty model dropdown | Executor unreachable; falls back to minimal static list |
 
