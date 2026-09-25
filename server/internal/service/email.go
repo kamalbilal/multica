@@ -233,6 +233,12 @@ func NewEmailService() *EmailService {
 		fmt.Printf("EmailService: SMTP relay %s:%s (%s) from=%s\n", smtpHost, smtpPort, tlsLabel, from)
 	case client != nil:
 		fmt.Printf("EmailService: Resend API from=%s\n", from)
+		if strings.HasSuffix(strings.ToLower(from), "@resend.dev") {
+			fmt.Printf(
+				"EmailService: WARNING %s is Resend's test sender — it only delivers to the email on your Resend account, not arbitrary addresses. Verify a domain at resend.com/domains and set RESEND_FROM_EMAIL, or configure SMTP_* in .env.\n",
+				from,
+			)
+		}
 	default:
 		fmt.Println("EmailService: DEV mode — codes printed to stdout (set MULTICA_DEV_VERIFICATION_CODE in .env for a fixed local code)")
 	}
@@ -334,6 +340,30 @@ func (s *EmailService) sendSMTP(to, subject, htmlBody string) error {
 	return c.Quit()
 }
 
+// PublicVerificationSendError turns provider failures into UI-safe text for /auth/send-code.
+func PublicVerificationSendError(err error) string {
+	if err == nil {
+		return "failed to send verification code"
+	}
+	msg := err.Error()
+	switch {
+	case strings.Contains(msg, "You can only send testing emails"):
+		return "Resend test sender (onboarding@resend.dev) only delivers to the email on your Resend account. Verify a domain at resend.com/domains and set RESEND_FROM_EMAIL, or configure SMTP in .env."
+	case strings.Contains(msg, "Invalid `to` field"):
+		return "Email provider rejected that recipient. With Resend's test sender, use the same address you used to sign up at resend.com, or configure SMTP or a verified domain."
+	case strings.Contains(strings.ToLower(msg), "smtp"):
+		return "SMTP could not send the verification email. Check SMTP_HOST, SMTP_USERNAME, SMTP_PASSWORD, and SMTP_TLS in .env."
+	default:
+		if idx := strings.Index(msg, "]: "); idx >= 0 {
+			msg = msg[idx+3:]
+		}
+		if len(msg) > 280 {
+			msg = msg[:280] + "…"
+		}
+		return "failed to send verification code: " + msg
+	}
+}
+
 // SendVerificationCode sends a one-time login code. The code is server-generated
 // (6-digit numeric) so no user-controlled text reaches the email body here.
 // Delivery priority: SMTP relay → Resend API → DEV stdout.
@@ -353,14 +383,24 @@ func (s *EmailService) SendVerificationCode(to, code string) error {
 		fmt.Printf("[DEV] Verification code for %s: %s\n", to, code)
 		return nil
 	}
+	from := s.fromEmail
+	if !strings.Contains(from, "<") {
+		from = "Multica <" + from + ">"
+	}
 	params := &resend.SendEmailRequest{
-		From:    s.fromEmail,
+		From:    from,
 		To:      []string{to},
 		Subject: "Your Multica verification code",
 		Html:    body,
 	}
-	_, err := s.client.Emails.Send(params)
-	return err
+	sent, err := s.client.Emails.Send(params)
+	if err != nil {
+		return err
+	}
+	if sent != nil && sent.Id != "" {
+		fmt.Printf("EmailService: verification email queued id=%s to=%s\n", sent.Id, to)
+	}
+	return nil
 }
 
 // SendInvitationEmail notifies the invitee that they have been invited to a workspace.

@@ -395,6 +395,47 @@ ensure_cursor_sdk_executor() {
   info "Set MULTICA_CURSOR_SDK_EXECUTOR for cursor_sdk provider."
 }
 
+upsert_env_line() {
+  local file=$1 key=$2 value=$3 tmp
+  tmp="$(mktemp)"
+  awk -v k="$key" -v v="$value" '
+    BEGIN { done = 0 }
+    index($0, k "=") == 1 { print k "=" v; done = 1; next }
+    { print }
+    END { if (!done) print k "=" v }
+  ' "$file" > "$tmp" && mv "$tmp" "$file"
+}
+
+# Keep the Next.js server proxy and browser on the same checkout backend.
+# NEXT_PUBLIC_* must stay empty so the browser calls /auth on the page origin;
+# REMOTE_API_URL is read at Next runtime and rewrites those paths to PORT.
+write_managed_desktop_env_file() {
+  local marker=${1:-fork}
+  DESKTOP_ENV_FILE="${DESKTOP_ENV_FILE:-$REPO_ROOT/apps/desktop/.env.development.local}"
+  cat > "$DESKTOP_ENV_FILE" <<EOF
+# Managed by scripts/dev-env.sh for environment ${marker}.
+VITE_API_URL=http://localhost:${BACKEND_PORT}
+VITE_WS_URL=ws://localhost:${BACKEND_PORT}/ws
+VITE_APP_URL=http://localhost:${FRONTEND_PORT}
+EOF
+}
+
+sync_fork_web_backend_urls() {
+  local file="$REPO_ROOT/$ENV_FILE"
+  [ -f "$file" ] || return 0
+  upsert_env_line "$file" "REMOTE_API_URL" "http://localhost:${BACKEND_PORT}"
+  upsert_env_line "$file" "NEXT_PUBLIC_API_URL" ""
+  upsert_env_line "$file" "NEXT_PUBLIC_WS_URL" ""
+  upsert_env_line "$file" "FRONTEND_ORIGIN" "http://localhost:${FRONTEND_PORT}"
+  upsert_env_line "$file" "MULTICA_APP_URL" "http://localhost:${FRONTEND_PORT}"
+  upsert_env_line "$file" "MULTICA_PUBLIC_URL" "http://localhost:${BACKEND_PORT}"
+  upsert_env_line "$file" "MULTICA_SERVER_URL" "ws://localhost:${BACKEND_PORT}/ws"
+  write_managed_desktop_env_file "${NAME:-fork}"
+  info "Browser uses same-origin /auth → http://localhost:${BACKEND_PORT} (REMOTE_API_URL)."
+  info "Desktop .env.development.local → http://localhost:${BACKEND_PORT}."
+  info "GitHub setup redirect → http://localhost:${FRONTEND_PORT}; webhook must target this API (see docs/github-integration)."
+}
+
 rewrite_env_ports() {
   local file="$REPO_ROOT/$1" offset=$2 backend=$3 frontend=$4 db=$5 tmp database_url escaped_database_url
   database_url="$(database_url_with_name "${DATABASE_URL:-}" "$db")" \
@@ -410,10 +451,11 @@ rewrite_env_ports() {
     -e "s|^MULTICA_SERVER_URL=.*|MULTICA_SERVER_URL=ws://localhost:${backend}/ws|" \
     -e "s|^MULTICA_PUBLIC_URL=.*|MULTICA_PUBLIC_URL=http://localhost:${backend}|" \
     -e "s|^MULTICA_APP_URL=.*|MULTICA_APP_URL=http://localhost:${frontend}|" \
-    -e "s|^NEXT_PUBLIC_API_URL=.*|NEXT_PUBLIC_API_URL=http://localhost:${backend}|" \
-    -e "s|^NEXT_PUBLIC_WS_URL=.*|NEXT_PUBLIC_WS_URL=ws://localhost:${backend}/ws|" \
+    -e "s|^NEXT_PUBLIC_API_URL=.*|NEXT_PUBLIC_API_URL=|" \
+    -e "s|^NEXT_PUBLIC_WS_URL=.*|NEXT_PUBLIC_WS_URL=|" \
     "$file" > "$tmp"
   mv "$tmp" "$file"
+  upsert_env_line "$file" "REMOTE_API_URL" "http://localhost:${backend}"
 }
 
 # ---------------------------------------------------------------- database ---
@@ -514,6 +556,35 @@ launch_detached() {
   )
 }
 
+kill_pid() {
+  local pid=$1
+  [ -n "$pid" ] || return 0
+  kill -TERM "$pid" 2>/dev/null || true
+  sleep 1
+  if kill -0 "$pid" 2>/dev/null; then
+    kill -KILL "$pid" 2>/dev/null || true
+    sleep 1
+  fi
+  ! kill -0 "$pid" 2>/dev/null
+}
+
+# Git Bash cannot always tear down make → server.exe through the launcher's process
+# group. After stopping a component we launched, drop any listener still bound to
+# our port so the next start does not health-check a stale build.
+release_component_port() {
+  local port=$1 had_launcher=${2:-0} listener=""
+  [ -n "$port" ] || return 0
+  listener="$(port_listener_pid "$port")"
+  [ -n "$listener" ] || return 0
+  [ "$had_launcher" = 1 ] || return 0
+  if kill_pid "$listener"; then
+    info "released :$port (pid $listener)"
+  else
+    warn "listener pid $listener is still bound to :$port"
+    return 1
+  fi
+}
+
 dev_env_has_make() {
   command -v make >/dev/null 2>&1
 }
@@ -526,6 +597,34 @@ component_run_mode_label() {
   fi
 }
 
+server_binary_path() {
+  local exe=""
+  case "$(uname -s 2>/dev/null)" in
+    MINGW*|MSYS*|CYGWIN*) exe=.exe ;;
+  esac
+  printf '%s/server/bin/server%s' "$REPO_ROOT" "$exe"
+}
+
+production_api_commit() {
+  local path commit
+  path="$(server_binary_path)"
+  [ -f "$path" ] || return 1
+  commit="$(go version -m "$path" 2>/dev/null \
+    | sed -n 's/.*-X main.commit=\([^"]*\).*/\1/p' | head -1)"
+  [ -n "$commit" ] || return 1
+  printf '%s' "$commit"
+}
+
+assert_production_api_matches_checkout() {
+  [ "$COMPONENT_RUN_MODE" = production ] || return 0
+  local expected binary
+  expected="$(checkout_commit)"
+  binary="$(production_api_commit)" || die "Missing server binary. Run: just build"
+  if [ "$binary" != "$expected" ]; then
+    die "Server binary commit $binary does not match checkout $expected. Run: just build"
+  fi
+}
+
 require_production_artifacts() {
   local component=$1 exe=""
   case "$(uname -s 2>/dev/null)" in
@@ -535,6 +634,7 @@ require_production_artifacts() {
     api)
       [ -f "$REPO_ROOT/server/bin/server$exe" ] \
         || die "Missing server binary. Run: just build"
+      assert_production_api_matches_checkout
       ;;
     web)
       [ -f "$REPO_ROOT/apps/web/.next/BUILD_ID" ] \
@@ -734,8 +834,9 @@ api_identity_matches() {
 }
 
 start_api() {
-  local launched_at health waited=0 expected_commit
+  local launched_at health waited=0 expected_commit reported_commit binary_commit
   expected_commit="$(checkout_commit)"
+  assert_production_api_matches_checkout
   if health="$(health_json)" && [ -n "$health" ] && component_pid api >/dev/null; then
     if api_identity_matches "$health" "$expected_commit"; then
       record_component_listener api "$BACKEND_PORT" >/dev/null \
@@ -745,7 +846,22 @@ start_api() {
     fi
     if health_belongs_to_api "$health"; then
       warn "api on :$BACKEND_PORT is ours but not commit $expected_commit; restarting it."
+      local stale_listener stale_health_pid listener
+      stale_listener="$(port_listener_pid "$BACKEND_PORT")"
+      stale_health_pid="$(json_field "$health" pid || true)"
       stop_component api
+      if ! port_free "$BACKEND_PORT"; then
+        [ -n "$stale_listener" ] && kill_pid "$stale_listener"
+        if [ -n "$stale_health_pid" ] && [ "$stale_health_pid" != "$stale_listener" ]; then
+          kill_pid "$stale_health_pid"
+        fi
+        listener="$(port_listener_pid "$BACKEND_PORT")"
+        [ -n "$listener" ] && kill_pid "$listener"
+      fi
+      if ! port_free "$BACKEND_PORT"; then
+        die "Port $BACKEND_PORT is still busy after stopping api: $(describe_port_owner "$BACKEND_PORT").
+Run 'just down' here first, then 'just build' if you changed the checkout."
+      fi
     else
       die "Port $BACKEND_PORT answers /health, but its pid/commit does not match this environment. Refusing to reuse or kill it."
     fi
@@ -765,6 +881,16 @@ Run 'make down' here first — a leftover instance answers /health with 200 and 
       # A 200 is not enough: pid, process group, commit and launch time all have
       # to identify the process this environment just started.
       if ! api_identity_matches "$health" "$expected_commit" "$launched_at"; then
+        reported_commit="$(json_field "$health" commit || true)"
+        binary_commit="$(production_api_commit || true)"
+        if [ "$COMPONENT_RUN_MODE" = production ] \
+          && [ -n "$reported_commit" ] \
+          && [ -n "$binary_commit" ] \
+          && [ "$reported_commit" = "$binary_commit" ] \
+          && [ "$reported_commit" != "$expected_commit" ]; then
+          stop_component api
+          die "Server binary commit $reported_commit does not match checkout $expected_commit. Run: just build"
+        fi
         stop_component api
         die "Something else is serving :$BACKEND_PORT, or the launched api did not report pid/commit/started_at for commit $expected_commit."
       fi
@@ -784,7 +910,9 @@ Run 'make down' here first — a leftover instance answers /health with 200 and 
 
 start_web() {
   local waited=0 listener
-  if curl -sf --max-time 15 "http://localhost:${FRONTEND_PORT}" >/dev/null 2>&1; then
+  if [ "$COMPONENT_RUN_MODE" = production ]; then
+    stop_component web || true
+  elif curl -sf --max-time 15 "http://localhost:${FRONTEND_PORT}" >/dev/null 2>&1; then
     listener="$(record_component_listener web "$FRONTEND_PORT" || true)"
     if [ -n "$listener" ]; then
       ok "web already running on :$FRONTEND_PORT (pid $listener)"
@@ -991,6 +1119,7 @@ start_desktop() {
 # Managed by scripts/dev-env.sh for environment ${NAME}.
 VITE_API_URL=http://localhost:${BACKEND_PORT}
 VITE_WS_URL=ws://localhost:${BACKEND_PORT}/ws
+VITE_APP_URL=http://localhost:${FRONTEND_PORT}
 EOF
   launch_component desktop desktop
 
@@ -1028,11 +1157,12 @@ desktop_env_matches() {
   [ -f "$DESKTOP_ENV_FILE" ] \
     && grep -Fqx "# Managed by scripts/dev-env.sh for environment ${NAME}." "$DESKTOP_ENV_FILE" \
     && grep -Fqx "VITE_API_URL=http://localhost:${BACKEND_PORT}" "$DESKTOP_ENV_FILE" \
-    && grep -Fqx "VITE_WS_URL=ws://localhost:${BACKEND_PORT}/ws" "$DESKTOP_ENV_FILE"
+    && grep -Fqx "VITE_WS_URL=ws://localhost:${BACKEND_PORT}/ws" "$DESKTOP_ENV_FILE" \
+    && grep -Fqx "VITE_APP_URL=http://localhost:${FRONTEND_PORT}" "$DESKTOP_ENV_FILE"
 }
 
 stop_component() {
-  local name=$1 pid launcher="" status state recorded_listener="" port="" listener=""
+  local name=$1 pid launcher="" status state recorded_listener="" port="" listener="" had_launcher=0
   case "$name" in
     daemon)
       if [ -x "$MULTICA_BIN" ]; then
@@ -1069,6 +1199,7 @@ stop_component() {
   recorded_listener="$(cat "$(listener_pid_file "$name")" 2>/dev/null || true)"
   pid="$(component_pid "$name" || true)"
   if [ -n "$pid" ]; then
+    had_launcher=1
     launcher="$pid"
     # Capture an older environment's listener before killing the launcher. A
     # nested process group may survive that signal and then lose its PPID chain
@@ -1107,13 +1238,7 @@ stop_component() {
     if [ -n "$listener" ]; then
       if { [ -n "$recorded_listener" ] && [ "$listener" = "$recorded_listener" ]; } \
         || { [ -n "$launcher" ] && [ "$(process_group_id "$listener")" = "$launcher" ]; }; then
-        kill -TERM "$listener" 2>/dev/null || true
-        sleep 1
-        if kill -0 "$listener" 2>/dev/null; then
-          kill -KILL "$listener" 2>/dev/null || true
-          sleep 1
-        fi
-        if kill -0 "$listener" 2>/dev/null; then
+        if ! kill_pid "$listener"; then
           warn "$name listener pid $listener is still running"
           return 1
         fi
@@ -1121,6 +1246,9 @@ stop_component() {
       else
         warn "left :$port alone: listener pid $listener is not owned by this environment"
       fi
+    fi
+    if is_windows_shell; then
+      release_component_port "$port" "$had_launcher" || return 1
     fi
   fi
   rm -f "$(listener_pid_file "$name")"
@@ -1426,7 +1554,7 @@ Start the rest with 'make up C=api,web', or run 'make up C=daemon' from your own
     fi
     info "Created $ENV_FILE"
   fi
-  if [ "$COMPONENT_RUN_MODE" != production ]; then
+  if ! grep -qE '^APP_ENV=production[[:space:]]*$' "$REPO_ROOT/$ENV_FILE" 2>/dev/null; then
     ensure_dev_code "$ENV_FILE"
   fi
   ensure_cursor_sdk_executor "$ENV_FILE"
@@ -1504,6 +1632,12 @@ Start the rest with 'make up C=api,web', or run 'make up C=daemon' from your own
   # The manifest is the source of truth from here on; re-export so every child
   # sees the same values the registry recorded.
   export PORT="$BACKEND_PORT" FRONTEND_PORT DATABASE_URL POSTGRES_DB="$DB_NAME"
+
+  if component_selected web || component_selected api; then
+    sync_fork_web_backend_urls
+    load_env_file "$ENV_FILE"
+    export PORT="$BACKEND_PORT" FRONTEND_PORT DATABASE_URL POSTGRES_DB="$DB_NAME"
+  fi
 
   if [ ! -d "$REPO_ROOT/node_modules" ] && { component_selected web || component_selected desktop; }; then
     step "Dependencies"

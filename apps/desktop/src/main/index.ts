@@ -15,7 +15,7 @@ import { installNavigationGuard } from "./navigation-guard";
 import { createRendererWebPreferences } from "./renderer-web-preferences";
 import { getAppVersion } from "./app-version";
 import { loadRuntimeConfig } from "./runtime-config-loader";
-import type { RuntimeConfigResult } from "../shared/runtime-config";
+import type { RuntimeConfigEnv, RuntimeConfigResult } from "../shared/runtime-config";
 import {
   RENDERER_ROUTE_CONTEXT_CHANNEL,
   sanitizeRendererRouteContext,
@@ -123,6 +123,25 @@ if (process.platform !== "win32") {
 
 const PROTOCOL = "multica";
 const devLog = is.dev ? createBestEffortDevLog() : undefined;
+
+function resolveDesktopViteEnv(viteEnv: ImportMetaEnv): RuntimeConfigEnv {
+  const env = viteEnv as ImportMetaEnv & {
+    readonly VITE_API_URL?: string;
+    readonly VITE_WS_URL?: string;
+    readonly VITE_APP_URL?: string;
+  };
+  return {
+    apiUrl: env.VITE_API_URL ?? process.env.VITE_API_URL,
+    wsUrl: env.VITE_WS_URL ?? process.env.VITE_WS_URL,
+    appUrl: env.VITE_APP_URL ?? process.env.VITE_APP_URL,
+  };
+}
+
+/** electron-vite preview is not `is.dev` but still uses local VITE_* overrides. */
+function useDevRuntimeConfig(env: RuntimeConfigEnv): boolean {
+  if (is.dev) return true;
+  return Boolean(env.apiUrl?.trim());
+}
 
 // Where the main process parks a freeze/crash breadcrumb until the next
 // renderer boot flushes it to telemetry. Lives in userData so it survives a
@@ -618,22 +637,13 @@ if (!gotTheLock) {
   if (coldStartDeepLink) handleDeepLink(coldStartDeepLink);
 
   app.whenReady().then(async () => {
-    const viteEnv = import.meta.env as ImportMetaEnv & {
-      readonly VITE_API_URL?: string;
-      readonly VITE_WS_URL?: string;
-      readonly VITE_APP_URL?: string;
-    };
+    const viteEnvOverrides = resolveDesktopViteEnv(import.meta.env);
 
     runtimeConfigResult = await loadRuntimeConfig({
-      isDev: is.dev,
+      isDev: useDevRuntimeConfig(viteEnvOverrides),
       // electron-vite exposes VITE_* on import.meta.env for the main process;
-      // keep dev URL overrides on the same source the renderer used before
-      // runtime config moved endpoint resolution into main/preload.
-      env: {
-        apiUrl: viteEnv.VITE_API_URL,
-        wsUrl: viteEnv.VITE_WS_URL,
-        appUrl: viteEnv.VITE_APP_URL,
-      },
+      // preview:local also injects them via process.env (see preview-local.mjs).
+      env: viteEnvOverrides,
     });
 
     electronApp.setAppUserModelId(

@@ -23,6 +23,7 @@ import (
 	"github.com/multica-ai/multica/server/internal/analytics"
 	"github.com/multica-ai/multica/server/internal/auth"
 	"github.com/multica-ai/multica/server/internal/logger"
+	"github.com/multica-ai/multica/server/internal/service"
 	obsmetrics "github.com/multica-ai/multica/server/internal/metrics"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
@@ -386,7 +387,7 @@ func (h *Handler) SendCode(w http.ResponseWriter, r *http.Request) {
 
 	if err := h.EmailService.SendVerificationCode(email, code); err != nil {
 		slog.Error("failed to send verification code", "email", email, "error", err)
-		writeError(w, http.StatusInternalServerError, "failed to send verification code")
+		writeError(w, http.StatusInternalServerError, service.PublicVerificationSendError(err))
 		return
 	}
 

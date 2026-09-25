@@ -13,7 +13,7 @@
 // exactly as documented. This module only adds the two knobs needed for two
 // Electron processes to coexist.
 
-import { statSync } from "node:fs";
+import { existsSync, readFileSync, statSync } from "node:fs";
 import { basename, join } from "node:path";
 
 // Worktree renderer ports start at 5174 so they never reuse 5173 — the primary
@@ -112,6 +112,36 @@ export function repoRootFromScriptDir(scriptDir) {
 
 // Populate DESKTOP_RENDERER_PORT / DESKTOP_APP_SUFFIX on `env` for a worktree
 // checkout, without overriding values the caller set explicitly. Returns `env`.
+/** Load VITE_* from apps/desktop/.env.development.local (then .env.development). */
+export function loadDesktopViteEnv(appDir, env = process.env) {
+  const candidates = [
+    join(appDir, ".env.development.local"),
+    join(appDir, ".env.development"),
+  ];
+  for (const path of candidates) {
+    if (!existsSync(path)) continue;
+    for (const line of readFileSync(path, "utf8").split(/\r?\n/)) {
+      const trimmed = line.trim();
+      if (!trimmed || trimmed.startsWith("#")) continue;
+      const eq = trimmed.indexOf("=");
+      if (eq === -1) continue;
+      const key = trimmed.slice(0, eq).trim();
+      if (!key.startsWith("VITE_")) continue;
+      if (env[key] !== undefined && env[key] !== "") continue;
+      let value = trimmed.slice(eq + 1).trim();
+      if (
+        (value.startsWith('"') && value.endsWith('"')) ||
+        (value.startsWith("'") && value.endsWith("'"))
+      ) {
+        value = value.slice(1, -1);
+      }
+      env[key] = value;
+    }
+    return env;
+  }
+  return env;
+}
+
 export function applyWorktreeDevEnv(env, { root, log = false } = {}) {
   const hasPort = Boolean(env.DESKTOP_RENDERER_PORT);
   const hasSuffix = Boolean(env.DESKTOP_APP_SUFFIX);

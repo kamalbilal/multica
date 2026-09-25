@@ -41,6 +41,14 @@ func (f *fakeSMTPAuthClient) Extension(name string) (bool, string) {
 	return false, ""
 }
 
+func TestPublicVerificationSendError_ResendTestSender(t *testing.T) {
+	err := errors.New("[ERROR]: You can only send testing emails to your own email address")
+	got := PublicVerificationSendError(err)
+	if !strings.Contains(got, "Resend test sender") {
+		t.Fatalf("message = %q", got)
+	}
+}
+
 func TestSMTPAuthWithFallback_UsesPlainWhenAccepted(t *testing.T) {
 	client := &fakeSMTPAuthClient{}
 	fallback, err := smtpAuthWithFallback(client, "smtp.office365.com", "user", "pass")

@@ -7,6 +7,7 @@ import {
   appSuffixForPath,
   applyWorktreeDevEnv,
   cksum,
+  loadDesktopViteEnv,
   offsetForPath,
   rendererPortForPath,
 } from "./worktree-dev-env.mjs";
@@ -122,5 +123,17 @@ describe("worktree-dev-env", () => {
     applyWorktreeDevEnv(env, { root });
     expect(env.DESKTOP_RENDERER_PORT).toBe("9999");
     expect(env.DESKTOP_APP_SUFFIX).toBe(appSuffixForPath(root));
+  });
+
+  it("loadDesktopViteEnv reads VITE_* from .env.development.local", () => {
+    const root = tmpRoot("none");
+    writeFileSync(
+      join(root, ".env.development.local"),
+      "# comment\nVITE_API_URL=http://localhost:18451\nVITE_APP_URL=http://localhost:13371\n",
+    );
+    const env = {};
+    loadDesktopViteEnv(root, env);
+    expect(env.VITE_API_URL).toBe("http://localhost:18451");
+    expect(env.VITE_APP_URL).toBe("http://localhost:13371");
   });
 });
