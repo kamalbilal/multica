@@ -197,8 +197,11 @@ func (b *cursorSdkBackend) Execute(ctx context.Context, prompt string, opts Exec
 						if msg.Type == MessageToolUse && msg.CallID != "" && isMulticaIssueCommentAddTool(msg) {
 							issueCommentCallIDs.Store(msg.CallID, struct{}{})
 						}
-						if msg.Type == MessageToolResult && msg.CallID != "" {
-							if _, tracked := issueCommentCallIDs.LoadAndDelete(msg.CallID); tracked && multicaIssueCommentAddToolSucceeded(msg) {
+						if msg.Type == MessageToolResult {
+							_, tracked := issueCommentCallIDs.LoadAndDelete(msg.CallID)
+							posted := (tracked && multicaIssueCommentAddToolSucceeded(msg)) ||
+								multicaIssueCommentAddResultPosted(msg)
+							if posted {
 								b.cfg.Logger.Info("cursor sdk posted issue comment; waiting for idle before ending turn", "call_id", msg.CallID, "idle", idleWait)
 								commentWatchdog.arm(idleWait, func() {
 									deliveryCompleted.Store(true)

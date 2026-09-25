@@ -21,6 +21,18 @@ func isMulticaIssueCommentAddTool(msg Message) bool {
 	return false
 }
 
+// multicaIssueCommentAddResultPosted reports whether a tool_result is a
+// successful `multica issue comment add`. Used as a fallback when the tool-use
+// command was wrapped through a variable, quoted Windows path, or multiline
+// script that the command parser missed — the CLI still prints
+// "Comment added to issue …".
+func multicaIssueCommentAddResultPosted(msg Message) bool {
+	if !multicaIssueCommentAddToolSucceeded(msg) {
+		return false
+	}
+	return strings.Contains(strings.ToLower(msg.Output), "comment added")
+}
+
 // multicaIssueCommentAddToolSucceeded reports whether a tool_result indicates the
 // comment was actually posted (not a failed shell invocation).
 func multicaIssueCommentAddToolSucceeded(msg Message) bool {
@@ -57,7 +69,9 @@ func shellToolResultExitCode(output string) (int, bool) {
 	return wrapper.Value.ExitCode, true
 }
 
-// shellCommandSegments splits a compound shell command on ;, &&, and || outside quotes.
+// shellCommandSegments splits a compound shell command on ;, &&, ||, and
+// newlines outside quotes. Agents routinely write a variable assignment, an
+// export, a cd, and the CLI call as separate lines in one Shell tool payload.
 func shellCommandSegments(command string) []string {
 	var segments []string
 	var current strings.Builder
@@ -72,7 +86,7 @@ func shellCommandSegments(command string) []string {
 		case c == '"' && !inSingle:
 			inDouble = !inDouble
 			current.WriteByte(c)
-		case !inSingle && !inDouble && c == ';':
+		case !inSingle && !inDouble && (c == ';' || c == '\n' || c == '\r'):
 			appendShellSegment(&segments, &current)
 		case !inSingle && !inDouble && i+1 < len(command) && c == '&' && command[i+1] == '&':
 			appendShellSegment(&segments, &current)
@@ -108,11 +122,56 @@ func isMulticaIssueCommentAddCommand(command string) bool {
 	if len(parts) < 4 {
 		return false
 	}
-	executable := strings.TrimPrefix(parts[0], "./")
-	if executable != "multica" && !strings.HasSuffix(executable, "/multica") {
+	if !isMulticaCLIExecutable(parts[0]) {
 		return false
 	}
 	return parts[1] == "issue" && parts[2] == "comment" && parts[3] == "add"
+}
+
+// isMulticaCLIExecutable reports whether tok names the Multica CLI. Agents on
+// Windows invoke `multica.exe`, quoted absolute paths, or a `$MC` / `$MULTICA`
+// variable assigned earlier in the same shell payload — none of which match a
+// literal `multica` basename.
+func isMulticaCLIExecutable(tok string) bool {
+	tok = strings.Trim(strings.TrimSpace(tok), `"'`)
+	if tok == "" {
+		return false
+	}
+	if isShellVarRef(tok) {
+		return true
+	}
+	tok = strings.TrimPrefix(tok, "./")
+	tok = strings.TrimPrefix(tok, `.\`)
+	if i := strings.LastIndexAny(tok, `/\`); i >= 0 {
+		tok = tok[i+1:]
+	}
+	return strings.EqualFold(tok, "multica") || strings.EqualFold(tok, "multica.exe")
+}
+
+func isShellVarRef(tok string) bool {
+	if strings.HasPrefix(tok, "${") && strings.HasSuffix(tok, "}") {
+		return isEnvVarName(tok[2 : len(tok)-1])
+	}
+	if strings.HasPrefix(tok, "$") && len(tok) > 1 {
+		return isEnvVarName(tok[1:])
+	}
+	return false
+}
+
+func isEnvVarName(name string) bool {
+	if name == "" {
+		return false
+	}
+	for i := 0; i < len(name); i++ {
+		c := name[i]
+		switch {
+		case c == '_', c >= 'A' && c <= 'Z', c >= 'a' && c <= 'z':
+		case i > 0 && c >= '0' && c <= '9':
+		default:
+			return false
+		}
+	}
+	return true
 }
 
 // trimLeadingEnvAssignments drops leading `KEY=VALUE` tokens so an invocation
@@ -130,16 +189,7 @@ func isEnvAssignment(tok string) bool {
 	if eq <= 0 {
 		return false
 	}
-	for i := 0; i < eq; i++ {
-		c := tok[i]
-		switch {
-		case c == '_', c >= 'A' && c <= 'Z', c >= 'a' && c <= 'z':
-		case i > 0 && c >= '0' && c <= '9':
-		default:
-			return false
-		}
-	}
-	return true
+	return isEnvVarName(tok[:eq])
 }
 
 // isPOSIXShellName reports whether tok names a shell that takes `-c <command>`.
