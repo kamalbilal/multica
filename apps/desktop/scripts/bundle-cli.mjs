@@ -16,9 +16,26 @@
 import { access, chmod, copyFile, mkdir, rm } from "node:fs/promises";
 import { constants } from "node:fs";
 import { execFileSync, execSync } from "node:child_process";
+import { homedir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { deriveVersion } from "./package.mjs";
+
+// Turbo/pnpm on Windows sometimes spawn without LOCALAPPDATA. Go then
+// refuses to build: "GOCACHE is not defined and %LocalAppData% is not defined".
+function envWithGoBuildCache(env) {
+  const next = { ...env };
+  if (process.platform === "win32" && !next.LOCALAPPDATA) {
+    const home = next.USERPROFILE || next.HOME || homedir();
+    next.LOCALAPPDATA = join(home, "AppData", "Local");
+  }
+  if (!next.GOCACHE) {
+    next.GOCACHE = next.LOCALAPPDATA
+      ? join(next.LOCALAPPDATA, "go-build")
+      : join(homedir(), ".cache", "go-build");
+  }
+  return next;
+}
 
 const here = dirname(fileURLToPath(import.meta.url));
 const repoRoot = resolve(here, "..", "..", "..");
@@ -125,12 +142,12 @@ if (hasGo()) {
     {
       cwd: serverDir,
       stdio: "inherit",
-      env: {
+      env: envWithGoBuildCache({
         ...process.env,
         CGO_ENABLED: "0",
         GOOS: goos,
         GOARCH: goarch,
-      },
+      }),
     },
   );
 } else {
