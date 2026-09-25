@@ -173,6 +173,8 @@
     "avatar_label": "アバター",
     "name_label": "名前",
     "description_label": "説明",
+    "message_instructions_label": "メッセージ指示",
+    "message_instructions_hint": "このエージェントが受け取るすべてのメッセージの先頭に追加されます。",
     "change_avatar_aria": "アバターを変更",
     "avatar_updated_toast": "アバターを更新しました",
     "avatar_upload_failed_toast": "アバターをアップロードできませんでした",
@@ -274,6 +276,8 @@
     "name_placeholder": "例: ディープリサーチエージェント",
     "description_label": "説明",
     "description_placeholder": "このエージェントは何をしますか？",
+    "message_instructions_label": "メッセージ指示",
+    "message_instructions_hint": "このエージェントが受け取るすべてのメッセージの先頭に追加されます。",
     "visibility_label": "公開範囲",
     "access": {
       "label": "アクセス",

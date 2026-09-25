@@ -13,6 +13,7 @@ const draft = (): AgentDraft => ({
   name: "Old name",
   description: "Old description",
   instructions: "Old instructions",
+  messageInstructions: "",
   conversationStarters: [],
   avatarUrl: null,
   runtimeId: "runtime-1",
@@ -55,6 +56,17 @@ describe("agent builder protocol", () => {
     expect(merged.conversationStarters).toEqual([
       { label: "Review a PR", prompt: "Review the open PR." },
     ]);
+  });
+
+  it("merges optional message instructions from the builder draft", () => {
+    const merged = mergeBuilderDraft(
+      draft(),
+      { message_instructions: "Always reply in bullets." },
+      new Set(),
+      new Set(),
+      new Set(["model-1"]),
+    );
+    expect(merged.messageInstructions).toBe("Always reply in bullets.");
   });
 
   // Streaming delivers the reply token by token, so for the seconds it takes to

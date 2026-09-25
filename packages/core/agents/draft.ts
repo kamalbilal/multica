@@ -11,6 +11,7 @@ import {
   AGENT_DESCRIPTION_MAX_LENGTH,
   AGENT_MAX_CONCURRENT_TASKS_MAX,
   AGENT_MAX_CONCURRENT_TASKS_MIN,
+  AGENT_MESSAGE_INSTRUCTIONS_MAX_LENGTH,
 } from "./constants";
 
 // Declared with the other agent wire types so `StoredAgentDraft` can name it
@@ -26,6 +27,8 @@ export interface AgentDraft {
   name: string;
   description: string;
   instructions: string;
+  /** Standing inbound-turn prefix. Empty when unused. */
+  messageInstructions: string;
   conversationStarters: AgentConversationStarter[];
   avatarUrl: string | null;
   runtimeId: string;
@@ -45,6 +48,7 @@ export const EMPTY_AGENT_DRAFT: AgentDraft = {
   name: "",
   description: "",
   instructions: "",
+  messageInstructions: "",
   conversationStarters: [],
   avatarUrl: null,
   runtimeId: "",
@@ -96,6 +100,12 @@ export function applyDraftModelChange(
  */
 export function isDraftDescriptionWithinLimit(description: string): boolean {
   return [...description].length <= AGENT_DESCRIPTION_MAX_LENGTH;
+}
+
+export function isDraftMessageInstructionsWithinLimit(
+  messageInstructions: string,
+): boolean {
+  return [...messageInstructions].length <= AGENT_MESSAGE_INSTRUCTIONS_MAX_LENGTH;
 }
 
 export function buildInvocationTargets(
@@ -189,6 +199,7 @@ export function buildDuplicateDraft(
     name: `${source.name}${options.nameSuffix}`,
     description: source.description ?? "",
     instructions: source.instructions ?? "",
+    messageInstructions: source.message_instructions ?? "",
     conversationStarters: (source.conversation_starters ?? []).map((item) => ({ ...item })),
     avatarUrl: source.avatar_url ?? null,
     runtimeId: keepsRuntime
@@ -220,6 +231,7 @@ export function buildCreateAgentRequest(options: {
     name: draft.name.trim(),
     description: draft.description.trim(),
     instructions: draft.instructions.trim() || undefined,
+    message_instructions: draft.messageInstructions.trim() || undefined,
     ...(draft.conversationStarters.length > 0
       ? {
           conversation_starters: draft.conversationStarters.map((item) => ({

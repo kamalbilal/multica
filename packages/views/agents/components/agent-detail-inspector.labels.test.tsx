@@ -67,6 +67,18 @@ describe("AgentDetailInspector labels", () => {
 
     // Sanity check: the profile card actually rendered.
     expect(screen.getByLabelText("Name")).toBeInTheDocument();
+    expect(screen.getByLabelText("Description")).toBeInTheDocument();
+    expect(screen.getByLabelText("Message instructions")).toBeInTheDocument();
+    expect(
+      screen.getByText("Added to the start of every message this agent receives."),
+    ).toBeInTheDocument();
+
+    const description = screen.getByLabelText("Description");
+    const messageInstructions = screen.getByLabelText("Message instructions");
+    expect(
+      description.compareDocumentPosition(messageInstructions) &
+        Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
 
     expect(screen.queryByTestId("resource-label-picker")).toBeNull();
     expect(screen.queryByText("Labels")).toBeNull();

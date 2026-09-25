@@ -87,12 +87,12 @@ func waitTaskSupplement(ctx context.Context, wakeup <-chan struct{}, delay time.
 	}
 }
 
-func formatTaskSupplementInstruction(authorName, content string) string {
+func formatTaskSupplementInstruction(authorName, content, messageInstructions string) string {
 	authorName = strings.Join(strings.Fields(authorName), " ")
 	if authorName == "" {
 		authorName = "a user"
 	}
-	return fmt.Sprintf(`[ADDITIONAL GUIDANCE] Human %s added guidance while you were working.
+	body := fmt.Sprintf(`[ADDITIONAL GUIDANCE] Human %s added guidance while you were working.
 
 Treat this as additional guidance for the same active task, not as a replacement:
 - Preserve and complete the original objective.
@@ -102,6 +102,7 @@ Treat this as additional guidance for the same active task, not as a replacement
 
 Human message:
 %s`, strconv.Quote(authorName), content)
+	return prependStandingMessageInstructions(body, messageInstructions)
 }
 
 func taskSupplementEndpointUnsupported(err error) bool {
@@ -129,7 +130,7 @@ func taskSupplementFailureReason(ctx context.Context, err error) string {
 // one negotiated run. It performs no HTTP request until the provider confirms a live
 // turn, wakes immediately on a content-free WebSocket hint, and otherwise uses
 // the same five-second cadence as task cancellation polling.
-func (d *Daemon) runTaskSupplementLoop(ctx context.Context, session *agent.Session, taskID string, wakeup <-chan struct{}, taskLog *slog.Logger) {
+func (d *Daemon) runTaskSupplementLoop(ctx context.Context, session *agent.Session, taskID string, wakeup <-chan struct{}, taskLog *slog.Logger, messageInstructions string) {
 	if session == nil || session.Supplement == nil || session.SupplementReady == nil {
 		return
 	}
@@ -163,7 +164,7 @@ func (d *Daemon) runTaskSupplementLoop(ctx context.Context, session *agent.Sessi
 		// The adapter owns transport deadlines. Hook-based providers wait for a
 		// safe boundary, which can follow a long-running tool; run cancellation
 		// still aborts that wait and prevents late delivery.
-		injectErr := session.Supplement(ctx, formatTaskSupplementInstruction(supplement.AuthorName, supplement.Content))
+		injectErr := session.Supplement(ctx, formatTaskSupplementInstruction(supplement.AuthorName, supplement.Content, messageInstructions))
 		reason := taskSupplementFailureReason(ctx, injectErr)
 		if injectErr != nil {
 			// Raw provider/Go diagnostics remain local. Workspace-visible state is

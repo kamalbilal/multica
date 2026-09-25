@@ -36,6 +36,7 @@ import (
 // in unicode code points (utf8.RuneCountInString), matching Postgres
 // char_length and the front-end's String.prototype.length-with-counter UX.
 const maxAgentDescriptionLength = 255
+const maxAgentMessageInstructionsLength = 4000
 
 const (
 	maxAgentConversationStarters      = 3
@@ -72,6 +73,10 @@ type AgentResponse struct {
 	// holds only the workspace's own notes — the product half lives in
 	// SystemInstructions and is never stored on the row.
 	Instructions string `json:"instructions"`
+	// MessageInstructions is standing text prepended onto every inbound turn
+	// this agent receives. Distinct from Instructions (the identity/system
+	// prompt). Empty when unused.
+	MessageInstructions string `json:"message_instructions"`
 	// ConversationStarters are optional, agent-specific first-turn suggestions. An
 	// empty list tells clients to render their localized fallback prompts.
 	ConversationStarters []AgentConversationStarter `json:"conversation_starters"`
@@ -213,6 +218,7 @@ func (h *Handler) agentToResponse(a db.Agent) AgentResponse {
 		Name:                     a.Name,
 		Description:              a.Description,
 		Instructions:             a.Instructions,
+		MessageInstructions:      a.MessageInstructions,
 		ConversationStarters:     conversationStarters,
 		SystemKey:                a.SystemKey.String,
 		SystemInstructions:       systemInstructionsFor(a),
@@ -756,6 +762,7 @@ type TaskAgentData struct {
 	ID                    string                      `json:"id"`
 	Name                  string                      `json:"name"`
 	Instructions          string                      `json:"instructions"`
+	MessageInstructions   string                      `json:"message_instructions,omitempty"`
 	Skills                []service.AgentSkillData    `json:"skills,omitempty"`
 	SkillRefs             []service.AgentSkillRefData `json:"skill_refs,omitempty"`
 	CustomEnv             map[string]string           `json:"custom_env,omitempty"`
@@ -1291,6 +1298,7 @@ type CreateAgentRequest struct {
 	Name                 string                     `json:"name"`
 	Description          string                     `json:"description"`
 	Instructions         string                     `json:"instructions"`
+	MessageInstructions  string                     `json:"message_instructions"`
 	ConversationStarters []AgentConversationStarter `json:"conversation_starters"`
 	AvatarURL            *string                    `json:"avatar_url"`
 	RuntimeID            string                     `json:"runtime_id"`
@@ -1394,6 +1402,10 @@ func (h *Handler) CreateAgent(w http.ResponseWriter, r *http.Request) {
 	}
 	if utf8.RuneCountInString(req.Description) > maxAgentDescriptionLength {
 		writeError(w, http.StatusBadRequest, fmt.Sprintf("description must be %d characters or fewer", maxAgentDescriptionLength))
+		return
+	}
+	if utf8.RuneCountInString(req.MessageInstructions) > maxAgentMessageInstructionsLength {
+		writeError(w, http.StatusBadRequest, fmt.Sprintf("message_instructions must be %d characters or fewer", maxAgentMessageInstructionsLength))
 		return
 	}
 	if req.RuntimeID == "" {
@@ -1566,6 +1578,7 @@ func (h *Handler) CreateAgent(w http.ResponseWriter, r *http.Request) {
 		Name:                     req.Name,
 		Description:              req.Description,
 		Instructions:             req.Instructions,
+		MessageInstructions:      req.MessageInstructions,
 		AvatarUrl:                avatarURL,
 		RuntimeMode:              runtime.RuntimeMode,
 		RuntimeConfig:            rc,
@@ -1650,6 +1663,7 @@ type UpdateAgentRequest struct {
 	Name                 *string                     `json:"name"`
 	Description          *string                     `json:"description"`
 	Instructions         *string                     `json:"instructions"`
+	MessageInstructions  *string                     `json:"message_instructions"`
 	ConversationStarters *[]AgentConversationStarter `json:"conversation_starters"`
 	AvatarURL            *string                     `json:"avatar_url"`
 	RuntimeID            *string                     `json:"runtime_id"`
@@ -1917,6 +1931,13 @@ func (h *Handler) UpdateAgent(w http.ResponseWriter, r *http.Request) {
 	}
 	if req.Instructions != nil {
 		params.Instructions = pgtype.Text{String: *req.Instructions, Valid: true}
+	}
+	if req.MessageInstructions != nil {
+		if utf8.RuneCountInString(*req.MessageInstructions) > maxAgentMessageInstructionsLength {
+			writeError(w, http.StatusBadRequest, fmt.Sprintf("message_instructions must be %d characters or fewer", maxAgentMessageInstructionsLength))
+			return
+		}
+		params.MessageInstructions = pgtype.Text{String: *req.MessageInstructions, Valid: true}
 	}
 	if req.ConversationStarters != nil {
 		conversationStarters, err := normaliseAgentConversationStarters(*req.ConversationStarters)

@@ -47,7 +47,7 @@ func TestTaskSupplementLoopWaitsForTurnReadyBeforeClaim(t *testing.T) {
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
-		d.runTaskSupplementLoop(ctx, session, "task-ready", wakeup, d.logger)
+		d.runTaskSupplementLoop(ctx, session, "task-ready", wakeup, d.logger, "")
 	}()
 	time.Sleep(30 * time.Millisecond)
 	if got := claims.Load(); got != 0 {
@@ -116,7 +116,7 @@ func TestTaskSupplementLoopAcknowledgesBeforeTurnEnds(t *testing.T) {
 			}
 			wakeup, unsubscribe := d.taskSupplementSignals.subscribe("task-ack")
 			defer unsubscribe()
-			d.runTaskSupplementLoop(t.Context(), session, "task-ack", wakeup, d.logger)
+			d.runTaskSupplementLoop(t.Context(), session, "task-ack", wakeup, d.logger, "")
 			if injections != 1 {
 				t.Fatalf("injections = %d, want 1", injections)
 			}

@@ -181,6 +181,8 @@
     "avatar_label": "头像",
     "name_label": "名称",
     "description_label": "描述",
+    "message_instructions_label": "消息指令",
+    "message_instructions_hint": "会添加到此智能体收到的每条消息的开头。",
     "change_avatar_aria": "更换头像",
     "avatar_updated_toast": "已更新头像",
     "avatar_upload_failed_toast": "头像上传失败",
@@ -376,6 +378,8 @@
     "name_placeholder": "例如：深度研究智能体",
     "description_label": "描述",
     "description_placeholder": "这个智能体做什么？",
+    "message_instructions_label": "消息指令",
+    "message_instructions_hint": "会添加到此智能体收到的每条消息的开头。",
     "visibility_label": "可见性",
     "access": {
       "label": "访问权限",

@@ -2531,6 +2531,7 @@ func (h *Handler) buildClaimedTaskResponse(r *http.Request, task *db.AgentTaskQu
 		ID:                    uuidToString(agent.ID),
 		Name:                  agent.Name,
 		Instructions:          agent.Instructions,
+		MessageInstructions:   agent.MessageInstructions,
 		CustomEnv:             customEnv,
 		CustomArgs:            customArgs,
 		McpConfig:             mcpConfig,

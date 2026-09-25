@@ -190,6 +190,8 @@
     "avatar_label": "Avatar",
     "name_label": "Nom",
     "description_label": "Description",
+    "message_instructions_label": "Instructions de message",
+    "message_instructions_hint": "Ajouté au début de chaque message que cet agent reçoit.",
     "change_avatar_aria": "Changer d'avatar",
     "avatar_updated_toast": "Avatar mis à jour",
     "avatar_upload_failed_toast": "Échec de l'envoi de l'avatar",
@@ -386,6 +388,8 @@
     "name_placeholder": "ex. Agent de recherche approfondie",
     "description_label": "Description",
     "description_placeholder": "Que fait cet agent ?",
+    "message_instructions_label": "Instructions de message",
+    "message_instructions_hint": "Ajouté au début de chaque message que cet agent reçoit.",
     "visibility_label": "Visibilité",
     "access": {
       "label": "Accès",

@@ -11,6 +11,7 @@ import {
   AGENT_DESCRIPTION_MAX_LENGTH,
   AGENT_MAX_CONCURRENT_TASKS_MAX,
   AGENT_MAX_CONCURRENT_TASKS_MIN,
+  AGENT_MESSAGE_INSTRUCTIONS_MAX_LENGTH,
 } from "@multica/core/agents";
 import { api } from "@multica/core/api";
 import {
@@ -53,10 +54,15 @@ interface InspectorProps {
 interface ProfileDraft {
   name: string;
   description: string;
+  messageInstructions: string;
 }
 
 function profileDraftsEqual(left: ProfileDraft, right: ProfileDraft) {
-  return left.name === right.name && left.description === right.description;
+  return (
+    left.name === right.name &&
+    left.description === right.description &&
+    left.messageInstructions === right.messageInstructions
+  );
 }
 
 /**
@@ -82,29 +88,38 @@ export function AgentDetailInspector({
 
   const [name, setName] = useState(agent.name);
   const [description, setDescription] = useState(agent.description ?? "");
+  const [messageInstructions, setMessageInstructions] = useState(
+    agent.message_instructions ?? "",
+  );
 
   useEffect(() => {
     setName(agent.name);
     setDescription(agent.description ?? "");
+    setMessageInstructions(agent.message_instructions ?? "");
     // Reset only when moving to another agent. Cache updates from this form
     // must not erase a newer local draft while an autosave is in flight.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [agent.id]);
 
   const profileDraft = useMemo(
-    () => ({ name: name.trim(), description }),
-    [description, name],
+    () => ({ name: name.trim(), description, messageInstructions }),
+    [description, messageInstructions, name],
   );
   const savedProfile = useMemo(
     () => ({
       name: agent.name,
       description: agent.description ?? "",
+      messageInstructions: agent.message_instructions ?? "",
     }),
-    [agent.description, agent.name],
+    [agent.description, agent.message_instructions, agent.name],
   );
   const saveProfile = useCallback(
     async (next: ProfileDraft) => {
-      await update({ name: next.name, description: next.description });
+      await update({
+        name: next.name,
+        description: next.description,
+        message_instructions: next.messageInstructions,
+      });
     },
     [update],
   );
@@ -115,7 +130,9 @@ export function AgentDetailInspector({
     enabled:
       canEdit &&
       profileDraft.name.length > 0 &&
-      profileDraft.description.length <= AGENT_DESCRIPTION_MAX_LENGTH,
+      profileDraft.description.length <= AGENT_DESCRIPTION_MAX_LENGTH &&
+      [...profileDraft.messageInstructions].length <=
+        AGENT_MESSAGE_INSTRUCTIONS_MAX_LENGTH,
     isEqual: profileDraftsEqual,
   });
 
@@ -249,6 +266,32 @@ export function AgentDetailInspector({
               <CharCounter
                 length={[...description].length}
                 max={AGENT_DESCRIPTION_MAX_LENGTH}
+              />
+            </div>
+          </SettingsRow>
+
+          <SettingsRow
+            label={t(($) => $.inspector.message_instructions_label)}
+            description={t(($) => $.inspector.message_instructions_hint)}
+            size="text"
+            align="start"
+          >
+            <div>
+              <Textarea
+                name="agent-message-instructions"
+                autoComplete="off"
+                aria-label={t(($) => $.inspector.message_instructions_label)}
+                value={messageInstructions}
+                onChange={(event) => setMessageInstructions(event.target.value)}
+                onBlur={profileAutoSave.flush}
+                disabled={!canEdit}
+                rows={5}
+                maxLength={AGENT_MESSAGE_INSTRUCTIONS_MAX_LENGTH}
+                className="resize-y"
+              />
+              <CharCounter
+                length={[...messageInstructions].length}
+                max={AGENT_MESSAGE_INSTRUCTIONS_MAX_LENGTH}
               />
             </div>
           </SettingsRow>
