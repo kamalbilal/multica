@@ -7,7 +7,7 @@ The `cursor_sdk` provider runs agents through the official `@cursor/sdk` package
 | Requirement | Notes |
 | --- | --- |
 | Node.js 22+ | `node --version` must report major ≥ 22 |
-| `CURSOR_API_KEY` | Set on the runtime host or in the agent's custom env |
+| `CURSOR_API_KEY` | Repo root `.env` (recommended) or per-agent custom env |
 | Built executor | `fork/packages/cursor-sdk-executor/dist/cli.js` |
 | Multica dev stack | `make dev` (see [CONTRIBUTING.md](../../CONTRIBUTING.md)) |
 
@@ -36,8 +36,10 @@ export MULTICA_CURSOR_SDK_EXECUTOR=/absolute/path/to/fork/packages/cursor-sdk-ex
 ## Configure the runtime
 
 1. Ensure `node` is on `PATH` where the Multica daemon runs.
-2. Set `CURSOR_API_KEY` in the daemon environment **or** add it to the agent's custom env in the UI.
-3. Restart the daemon so the probe can discover `cursor_sdk`.
+2. Add `CURSOR_API_KEY=…` to the repository root `.env` (same file `make up` / `just up` load). Restart the daemon so the key is in the daemon process environment — every `cursor_sdk` agent on that runtime inherits it without per-agent custom env.
+3. Optional: Multica Canary (`pnpm dev:desktop`) reads `CURSOR_API_KEY` from that `.env` when it spawns the local daemon.
+4. Per-agent override only when needed: add `CURSOR_API_KEY` in the agent's **Environment** tab (wins over the daemon when set).
+5. Restart the daemon so the probe can discover `cursor_sdk`.
 
 When the key lives only in agent custom env, refresh the model list on the agent
 page so discovery forwards that key to the executor (daemon-level keys apply
