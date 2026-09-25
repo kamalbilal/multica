@@ -67,6 +67,7 @@ import {
   PluginPreviewSchema,
   EMPTY_PLUGIN_INSTALLATION_LIST,
   EMPTY_PLUGIN_PREVIEW,
+  StoredAgentDraftSchema,
 } from "./schemas";
 import { IssueViewSchema, IssueViewListSchema } from "./schemas";
 import {
@@ -2398,5 +2399,34 @@ describe("TaskMessageListSchema", () => {
   it("downgrades an unknown message type instead of dropping the transcript", () => {
     const parsed = TaskMessageListSchema.parse([{ ...row, type: "video" }]);
     expect(parsed[0]?.type).toBe("text");
+  });
+});
+
+describe("StoredAgentDraftSchema message_instructions", () => {
+  it("defaults a missing field so older stored drafts still restore", () => {
+    const parsed = parseWithFallback(
+      { name: "Reviewer", description: "", instructions: "Ship." },
+      StoredAgentDraftSchema,
+      {
+        name: "",
+        description: "",
+        instructions: "",
+        message_instructions: "",
+        conversation_starters: [],
+        avatar_url: null,
+        model: "",
+        thinking_level: "",
+        service_tier: "",
+        skill_ids: [],
+        permission_scope: "private" as const,
+        member_ids: [],
+        team_ids: [],
+        applied_message_id: null,
+      },
+      { endpoint: "GET /api/agent-builder/sessions" },
+    );
+    expect(parsed.message_instructions).toBe("");
+    expect(parsed.name).toBe("Reviewer");
+    expect(parsed.instructions).toBe("Ship.");
   });
 });

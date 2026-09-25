@@ -8,6 +8,7 @@ import {
   buildInvocationTargets,
   deriveDuplicateAccess,
   isDraftDescriptionWithinLimit,
+  isDraftMessageInstructionsWithinLimit,
   type AgentDraft,
 } from "./draft";
 
@@ -15,6 +16,7 @@ const draft = (): AgentDraft => ({
   name: "Old name",
   description: "Old description",
   instructions: "Old instructions",
+  messageInstructions: "",
   conversationStarters: [],
   avatarUrl: null,
   runtimeId: "runtime-1",
@@ -51,6 +53,7 @@ const sourceAgent = (overrides: Partial<Agent> = {}): Agent =>
     name: "Fast Codex",
     description: "Ships quickly",
     instructions: "Be quick",
+    message_instructions: "Always reply in bullets.",
     avatar_url: null,
     runtime_mode: "managed",
     runtime_config: {},
@@ -312,5 +315,32 @@ describe("agent draft execution overrides", () => {
     // Runes, not UTF-16 units: 255 CJK characters are exactly at the limit.
     expect(isDraftDescriptionWithinLimit("汉".repeat(255))).toBe(true);
     expect(isDraftDescriptionWithinLimit("汉".repeat(256))).toBe(false);
+  });
+
+  it("enforces the 4000-rune message-instructions limit the create API applies", () => {
+    expect(isDraftMessageInstructionsWithinLimit("a".repeat(4000))).toBe(true);
+    expect(isDraftMessageInstructionsWithinLimit("a".repeat(4001))).toBe(false);
+    expect(isDraftMessageInstructionsWithinLimit("汉".repeat(4000))).toBe(true);
+    expect(isDraftMessageInstructionsWithinLimit("汉".repeat(4001))).toBe(false);
+  });
+
+  it("copies message instructions on duplicate and omits them when empty", () => {
+    const duplicate = buildDuplicateDraft(sourceAgent(), {
+      runtimes: [CODEX_RUNTIME],
+      currentUserId: "user-1",
+      fallbackRuntimeId: "runtime-2",
+      nameSuffix: " (Copy)",
+    });
+    expect(duplicate.messageInstructions).toBe("Always reply in bullets.");
+    expect(
+      buildCreateAgentRequest({ draft: duplicate, runtimeId: "runtime-1" })
+        .message_instructions,
+    ).toBe("Always reply in bullets.");
+
+    const empty = buildCreateAgentRequest({
+      draft: draft(),
+      runtimeId: "runtime-1",
+    });
+    expect(empty.message_instructions).toBeUndefined();
   });
 });

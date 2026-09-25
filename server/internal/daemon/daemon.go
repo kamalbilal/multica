@@ -8689,9 +8689,11 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 	}
 	thinkingLevel := ""
 	serviceTier := ""
+	messageInstructions := ""
 	if task.Agent != nil {
 		thinkingLevel = task.Agent.ThinkingLevel
 		serviceTier = task.Agent.ServiceTier
+		messageInstructions = task.Agent.MessageInstructions
 	}
 	selection := resolveTaskModelSelection(ctx, provider, agent.NewCommand(entry.Path, profileFixedArgs),
 		taskModelSelection{Model: model, ThinkingLevel: thinkingLevel, ServiceTier: serviceTier}, taskLog)
@@ -8703,6 +8705,7 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 	}
 	execOpts := agent.ExecOptions{
 		EnableTaskSupplement:       taskSupplementNegotiated,
+		MessageInstructions:        messageInstructions,
 		McpConfigRefreshed:         envReused && provider == "cursor_sdk" && len(mcpConfig) > 0,
 		Cwd:                        env.WorkDir,
 		Model:                      model,
@@ -9355,7 +9358,7 @@ func (d *Daemon) executeAndDrain(ctx context.Context, backend agent.Backend, pro
 		go func() {
 			defer unsubscribe()
 			defer close(supplementsDone)
-			d.runTaskSupplementLoop(supplementCtx, session, taskID, wakeup, taskLog)
+			d.runTaskSupplementLoop(supplementCtx, session, taskID, wakeup, taskLog, opts.MessageInstructions)
 		}()
 		defer func() {
 			cancelSupplements()

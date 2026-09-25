@@ -190,6 +190,8 @@
     "avatar_label": "Avatar",
     "name_label": "Name",
     "description_label": "Description",
+    "message_instructions_label": "Message instructions",
+    "message_instructions_hint": "Added to the start of every message this agent receives.",
     "change_avatar_aria": "Change avatar",
     "avatar_updated_toast": "Avatar updated",
     "avatar_upload_failed_toast": "Failed to upload avatar",
@@ -386,6 +388,8 @@
     "name_placeholder": "e.g. Deep Research Agent",
     "description_label": "Description",
     "description_placeholder": "What does this agent do?",
+    "message_instructions_label": "Message instructions",
+    "message_instructions_hint": "Added to the start of every message this agent receives.",
     "visibility_label": "Visibility",
     "access": {
       "label": "Access",

@@ -3,6 +3,7 @@
 import { useEffect, useRef, type ReactNode } from "react";
 import {
   AGENT_DESCRIPTION_MAX_LENGTH,
+  AGENT_MESSAGE_INSTRUCTIONS_MAX_LENGTH,
   applyDraftModelChange,
   applyDraftRuntimeChange,
   type AgentDraft,
@@ -144,6 +145,33 @@ export function AgentConfigurationPanel({
               <CharCounter
                 length={[...draft.description].length}
                 max={AGENT_DESCRIPTION_MAX_LENGTH}
+              />
+            </div>
+          </DraftFieldRow>
+          <DraftFieldRow
+            compact={compact}
+            align="start"
+            label={t(($) => $.create_dialog.message_instructions_label)}
+            description={t(($) => $.create_dialog.message_instructions_hint)}
+            htmlFor="agent-create-message-instructions"
+          >
+            <div>
+              <Textarea
+                id="agent-create-message-instructions"
+                name="agent-message-instructions"
+                autoComplete="off"
+                aria-label={t(($) => $.create_dialog.message_instructions_label)}
+                value={draft.messageInstructions}
+                onChange={(event) =>
+                  set("messageInstructions", event.target.value)
+                }
+                rows={compact ? 4 : 5}
+                maxLength={AGENT_MESSAGE_INSTRUCTIONS_MAX_LENGTH}
+                className="resize-y"
+              />
+              <CharCounter
+                length={[...draft.messageInstructions].length}
+                max={AGENT_MESSAGE_INSTRUCTIONS_MAX_LENGTH}
               />
             </div>
           </DraftFieldRow>
@@ -426,12 +454,14 @@ export function AgentExecutionOverrides({
 
 function DraftFieldRow({
   label,
+  description,
   children,
   compact = false,
   align = "center",
   htmlFor,
 }: {
   label: string;
+  description?: string;
   children: ReactNode;
   compact?: boolean;
   align?: "center" | "start";
@@ -448,11 +478,23 @@ function DraftFieldRow({
       )}
     >
       {htmlFor ? (
-        <label htmlFor={htmlFor} className="text-body font-medium">
-          {label}
+        <label htmlFor={htmlFor} className="min-w-0">
+          <span className="text-body font-medium">{label}</span>
+          {description ? (
+            <span className="mt-0.5 block text-caption leading-5 text-muted-foreground">
+              {description}
+            </span>
+          ) : null}
         </label>
       ) : (
-        <div className="text-body font-medium">{label}</div>
+        <div className="min-w-0">
+          <div className="text-body font-medium">{label}</div>
+          {description ? (
+            <div className="mt-0.5 text-caption leading-5 text-muted-foreground">
+              {description}
+            </div>
+          ) : null}
+        </div>
       )}
       <div className="min-w-0">{children}</div>
     </div>

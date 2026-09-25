@@ -31,7 +31,7 @@ runtime as the source; pass --runtime-id to fork it onto a different runtime.
 Copied by default without a dedicated override flag: conversation starters.
 
 Copied by default, each overridable with the matching flag: name (suffixed
-" (copy)"), description, instructions, avatar, custom_args, max_concurrent_tasks,
+" (copy)"), description, instructions, message_instructions, avatar, custom_args, max_concurrent_tasks,
 invocation permission (permission_mode + allow-list), assigned workspace skills,
 and — only when the target runtime is unchanged — model, thinking_level and
 service_tier.
@@ -60,6 +60,7 @@ func registerAgentCopyFlags(cmd *cobra.Command) {
 	cmd.Flags().String("runtime-id", "", "Target runtime ID (default: the source agent's runtime). A different value forks the agent onto that runtime.")
 	cmd.Flags().String("description", "", "Override the copied description")
 	cmd.Flags().String("instructions", "", "Override the copied instructions")
+	cmd.Flags().String("message-instructions", "", "Override the copied standing inbound-turn prefix")
 	cmd.Flags().String("model", "", "Model identifier for the copy. Required when --runtime-id selects a different runtime (pass \"\" to accept the target runtime default). Empty otherwise = runtime default.")
 	cmd.Flags().String("thinking-level", "", "Override thinking level. Not carried across a runtime change unless set here.")
 	cmd.Flags().String("service-tier", "", "Override Codex service tier. Not carried across a runtime change unless set here.")
@@ -151,6 +152,11 @@ func runAgentCopy(cmd *cobra.Command, args []string) error {
 	if cmd.Flags().Changed("instructions") {
 		v, _ := cmd.Flags().GetString("instructions")
 		body["instructions"] = v
+	}
+	body["message_instructions"] = strVal(src, "message_instructions")
+	if cmd.Flags().Changed("message-instructions") {
+		v, _ := cmd.Flags().GetString("message-instructions")
+		body["message_instructions"] = v
 	}
 	if conversationStarters, ok := src["conversation_starters"].([]any); ok {
 		body["conversation_starters"] = conversationStarters

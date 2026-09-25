@@ -10,6 +10,7 @@ const draft = (): AgentDraft => ({
   name: "Release manager",
   description: "Ships carefully",
   instructions: "# Role\nShip.",
+  messageInstructions: "Keep replies short.",
   conversationStarters: [
     { label: "Plan a release", prompt: "Plan the next release." },
   ],

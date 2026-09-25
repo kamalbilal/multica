@@ -17,7 +17,15 @@ func TestMulticaIssueCommentAddCommand(t *testing.T) {
 		{`sh -c "multica issue comment add issue-1 --content-file ./reply.md"`, true},
 		{`bash -c 'multica issue comment add issue-1'`, true},
 		{`/bin/sh -c "multica issue comment add issue-1"`, true},
+		{`"$MC" issue comment add issue-1 --content-file ./reply.md`, true},
+		{`"$MULTICA" issue comment add issue-1 --content-file ./reply.md`, true},
+		{`${MC} issue comment add issue-1 --content-file ./reply.md`, true},
+		{`C:/Users/kamal/AppData/Local/Programs/@multicadesktop/resources/app.asar.unpacked/resources/bin/multica.exe issue comment add issue-1`, true},
+		{`C:\Users\kamal\work\multica.exe issue comment add issue-1`, true},
+		{`./multica.exe issue comment add issue-1`, true},
+		{`"C:/Users/kamal/work/multica.exe" issue comment add issue-1`, true},
 		{"multica issue get issue-1", false},
+		{`"$MC" issue get issue-1`, false},
 		{"echo multica issue comment add issue-1", false},
 		{`sh -c "echo multica issue comment add issue-1"`, false},
 		{"FOO=bar", false},
@@ -68,6 +76,8 @@ func TestMulticaIssueCommentAddToolIgnoresToolTitle(t *testing.T) {
 		`cd "C:\work\repo"; multica issue comment add issue-1 --content-file ./reply.md`,
 		`cd /tmp && multica issue comment add issue-1 --content-file ./reply.md`,
 		`cd "C:\Users\kamal\work"; multica issue comment add 01a0 --content-file ./reply.md --output table; if ($LASTEXITCODE -eq 0) { Remove-Item ./reply.md }`,
+		"MC=\"C:/Users/kamal/OneDrive/Documents/Github/multica-fork/server/bin/multica.exe\"\nexport MULTICA_SERVER_URL=http://localhost:18451\ncd \"/workdir\" && pwd && ls -la reply.md && \"$MC\" issue comment add 01a0caf4 --content-file ./reply.md",
+		"MULTICA=\"/c/Users/kamal/AppData/Local/Programs/@multicadesktop/resources/app.asar.unpacked/resources/bin/multica.exe\" && \"$MULTICA\" issue comment add 01a0caf4 --content-file ./reply.md",
 	}
 	for _, command := range compound {
 		msg := Message{
@@ -103,5 +113,18 @@ func TestMulticaIssueCommentAddToolSucceeded(t *testing.T) {
 		if got := multicaIssueCommentAddToolSucceeded(msg); got != tt.want {
 			t.Errorf("%s: multicaIssueCommentAddToolSucceeded() = %v, want %v", tt.name, got, tt.want)
 		}
+	}
+
+	posted := Message{Type: MessageToolResult, Output: successJSON, Status: "completed"}
+	if !multicaIssueCommentAddResultPosted(posted) {
+		t.Errorf("multicaIssueCommentAddResultPosted(exit zero + Comment added) = false, want true")
+	}
+	lsOK := Message{
+		Type:   MessageToolResult,
+		Output: `{"status":"success","value":{"exitCode":0,"stderr":""}}`,
+		Status: "completed",
+	}
+	if multicaIssueCommentAddResultPosted(lsOK) {
+		t.Errorf("multicaIssueCommentAddResultPosted(exit zero without Comment added) = true, want false")
 	}
 }

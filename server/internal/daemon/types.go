@@ -207,6 +207,7 @@ type AgentData struct {
 	ID                    string                     `json:"id"`
 	Name                  string                     `json:"name"`
 	Instructions          string                     `json:"instructions"`
+	MessageInstructions   string                     `json:"message_instructions,omitempty"`
 	Skills                []SkillData                `json:"skills,omitempty"`
 	SkillRefs             []SkillRefData             `json:"skill_refs,omitempty"`
 	CustomEnv             map[string]string          `json:"custom_env,omitempty"`

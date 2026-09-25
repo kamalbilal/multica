@@ -3,6 +3,7 @@ import {
   AGENT_CONVERSATION_STARTER_LABEL_MAX_LENGTH,
   AGENT_CONVERSATION_STARTER_MAX_LENGTH,
   AGENT_CONVERSATION_STARTERS_MAX,
+  AGENT_MESSAGE_INSTRUCTIONS_MAX_LENGTH,
 } from "./constants";
 import type { AgentDraft } from "./draft";
 
@@ -27,6 +28,7 @@ export interface BuilderDraftPayload {
   name?: unknown;
   description?: unknown;
   instructions?: unknown;
+  message_instructions?: unknown;
   conversation_starters?: unknown;
   model?: unknown;
   skill_ids?: unknown;
@@ -136,6 +138,7 @@ export function encodeBuilderInput(
           name: draft.name,
           description: draft.description,
           instructions: draft.instructions,
+          message_instructions: draft.messageInstructions,
           conversation_starters: draft.conversationStarters,
           model: draft.model,
           skill_ids: [...draft.skillIds],
@@ -284,6 +287,12 @@ export function mergeBuilderDraft(
       typeof payload.instructions === "string"
         ? payload.instructions
         : current.instructions,
+    messageInstructions:
+      typeof payload.message_instructions === "string"
+        ? [...payload.message_instructions]
+            .slice(0, AGENT_MESSAGE_INSTRUCTIONS_MAX_LENGTH)
+            .join("")
+        : current.messageInstructions,
     conversationStarters,
     model,
     // The builder can move the model, which invalidates whatever thinking /

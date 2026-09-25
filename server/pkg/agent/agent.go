@@ -27,7 +27,11 @@ type ExecOptions struct {
 	// EnableTaskSupplement installs provider hooks only for runs whose daemon/server
 	// capability handshake enabled additional messages.
 	EnableTaskSupplement bool
-	Cwd                  string
+	// MessageInstructions is the receiving agent's standing inbound-turn prefix.
+	// The daemon prepends it onto mid-run steer (task supplements) the same way
+	// BuildPrompt prefixes the opening user message. Empty when unused.
+	MessageInstructions string
+	Cwd                 string
 	Model                string
 	// SystemPrompt carries the Multica runtime brief for the few providers
 	// that cannot pick it up from disk. The daemon leaves it empty for every

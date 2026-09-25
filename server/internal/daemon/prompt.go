@@ -173,6 +173,20 @@ func buildWorktreeReplayConflictBlock(files []string) string {
 	return b.String()
 }
 
+const standingMessageInstructionsHeading = "## Standing message instructions"
+
+// prependStandingMessageInstructions puts the receiving agent's standing
+// inbound-turn prefix ahead of the per-turn body. Empty text is omitted so
+// the heading never appears as noise. Stored comments and chat are unchanged;
+// only the model-facing prompt is prefixed.
+func prependStandingMessageInstructions(body, messageInstructions string) string {
+	trimmed := strings.TrimSpace(messageInstructions)
+	if trimmed == "" {
+		return body
+	}
+	return standingMessageInstructionsHeading + "\n\n" + trimmed + "\n\n" + body
+}
+
 // BuildPrompt constructs the task prompt for an agent CLI.
 // Keep this minimal — detailed instructions live in CLAUDE.md / AGENTS.md
 // injected by execenv.InjectRuntimeConfig. The provider string is threaded
@@ -186,6 +200,9 @@ func BuildPrompt(task Task, provider string, options ...PromptOption) string {
 		apply(&opts)
 	}
 	body := buildPromptBody(task, provider)
+	if task.Agent != nil {
+		body = prependStandingMessageInstructions(body, task.Agent.MessageInstructions)
+	}
 	// Run-scoped context is appended, never prepended: everything ahead of it
 	// is stable across runs of a resumed session, and appending keeps it after
 	// the cached prefix (MUL-5377).

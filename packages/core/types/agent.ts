@@ -508,6 +508,12 @@ export interface Agent {
   /** What this agent's owner wrote. For a system agent this holds only the
    *  workspace's own notes — the product half is `system_instructions`. */
   instructions: string;
+  /**
+   * Standing text prepended onto every inbound turn this agent receives.
+   * Distinct from `instructions` (the identity/system prompt). Older servers
+   * omit it; treat missing as unused (`""`).
+   */
+  message_instructions?: string;
   /** Up to three agent-authored first-turn suggestions. Older servers omit it. */
   conversation_starters?: AgentConversationStarter[];
   /** Set for product-defined agents (e.g. "mika"). Absent for user- and
@@ -665,6 +671,8 @@ export interface CreateAgentRequest {
   name: string;
   description?: string;
   instructions?: string;
+  /** Standing inbound-turn prefix. Omitted when unused so older servers ignore it. */
+  message_instructions?: string;
   conversation_starters?: AgentConversationStarter[];
   avatar_url?: string;
   runtime_id: string;
@@ -718,6 +726,7 @@ export interface StoredAgentDraft {
   name: string;
   description: string;
   instructions: string;
+  message_instructions: string;
   conversation_starters: AgentConversationStarter[];
   avatar_url: string | null;
   model: string;
@@ -761,6 +770,7 @@ export interface UpdateAgentRequest {
   name?: string;
   description?: string;
   instructions?: string;
+  message_instructions?: string;
   conversation_starters?: AgentConversationStarter[];
   avatar_url?: string;
   runtime_id?: string;

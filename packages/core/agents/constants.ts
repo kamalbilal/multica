@@ -3,6 +3,10 @@
 // Kept in core so both apps and the test suite read from one source.
 export const AGENT_DESCRIPTION_MAX_LENGTH = 255;
 
+// Prefixed onto every inbound turn. Kept separate from the identity
+// system prompt (`instructions`) and long enough for standing policy.
+export const AGENT_MESSAGE_INSTRUCTIONS_MAX_LENGTH = 4000;
+
 export const AGENT_CONVERSATION_STARTERS_MAX = 3;
 export const AGENT_CONVERSATION_STARTER_LABEL_MAX_LENGTH = 80;
 export const AGENT_CONVERSATION_STARTER_MAX_LENGTH = 4000;

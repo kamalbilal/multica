@@ -11,6 +11,7 @@ import { useQuery } from "@tanstack/react-query";
 import {
   EMPTY_AGENT_DRAFT,
   isDraftDescriptionWithinLimit,
+  isDraftMessageInstructionsWithinLimit,
   AGENT_CONVERSATION_STARTER_LABEL_MAX_LENGTH,
   AGENT_CONVERSATION_STARTER_MAX_LENGTH,
   type AgentDraft,
@@ -149,6 +150,7 @@ export function useCreateAgentForm(options?: {
       selectedRuntime != null &&
       isRuntimeUsableForUser(selectedRuntime, currentUserId) &&
       isDraftDescriptionWithinLimit(draft.description) &&
+      isDraftMessageInstructionsWithinLimit(draft.messageInstructions) &&
       !accessInvalid &&
       !conversationStartersInvalid,
   };

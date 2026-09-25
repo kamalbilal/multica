@@ -650,6 +650,139 @@ func TestCursorSdkCompletesWhenExecutorIgnoresCancelAfterComment(t *testing.T) {
 	}
 }
 
+const hungAfterWindowsCommentCursorSdkExecutorScript = `
+const readline = require("node:readline");
+const rl = readline.createInterface({ input: process.stdin, crlfDelay: Infinity });
+function emit(event) { process.stdout.write(JSON.stringify(event) + "\n"); }
+rl.on("line", (line) => {
+  const cmd = JSON.parse(line.trim());
+  switch (cmd.cmd) {
+    case "execute":
+      emit({ event: "agent_id", agentId: "agent-hung-windows-comment" });
+      emit({ event: "message", type: "status", status: "running" });
+      emit({
+        event: "message",
+        type: "tool_use",
+        tool: "shell",
+        callId: "call-comment",
+        input: {
+          command: "MC=\"C:/Users/kamal/OneDrive/Documents/Github/multica-fork/server/bin/multica.exe\"\nexport MULTICA_SERVER_URL=http://localhost:18451\ncd \"/workdir\" && pwd && ls -la reply.md && \"$MC\" issue comment add 01a0caf4 --content-file ./reply.md",
+        },
+      });
+      emit({
+        event: "message",
+        type: "tool_result",
+        tool: "shell",
+        callId: "call-comment",
+        output: '{"status":"success","value":{"exitCode":0,"stderr":"Comment added to issue 01a0caf4.\\n"}}',
+      });
+      emit({ event: "message", type: "assistant", content: "full reply is on the issue thread" });
+      break;
+    case "cancel":
+    case "shutdown":
+      break;
+    default:
+      break;
+  }
+});
+`
+
+func TestCursorSdkCompletesWhenWindowsMulticaExeCommentHangs(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	script := filepath.Join(dir, "hung-windows-comment-cursor-sdk-executor.js")
+	if err := os.WriteFile(script, []byte(hungAfterWindowsCommentCursorSdkExecutorScript), 0o644); err != nil {
+		t.Fatalf("write hung windows executor: %v", err)
+	}
+
+	backend := mustCursorSdkBackend(t, script, 20*time.Millisecond)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+
+	session, err := backend.Execute(ctx, "do work", ExecOptions{
+		Cwd:   t.TempDir(),
+		Model: "composer-2",
+	})
+	if err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+
+	result, ok := readSessionResult(session.Result, 15*time.Second)
+	if !ok {
+		t.Fatal("timed out waiting for cursor sdk to complete after Windows $MC comment")
+	}
+	if result.Status != "completed" {
+		t.Fatalf("status = %q, want completed (error=%q)", result.Status, result.Error)
+	}
+}
+
+const hungAfterUnparsedCommentCursorSdkExecutorScript = `
+const readline = require("node:readline");
+const rl = readline.createInterface({ input: process.stdin, crlfDelay: Infinity });
+function emit(event) { process.stdout.write(JSON.stringify(event) + "\n"); }
+rl.on("line", (line) => {
+  const cmd = JSON.parse(line.trim());
+  switch (cmd.cmd) {
+    case "execute":
+      emit({ event: "agent_id", agentId: "agent-hung-unparsed-comment" });
+      emit({ event: "message", type: "status", status: "running" });
+      emit({
+        event: "message",
+        type: "tool_use",
+        tool: "shell",
+        callId: "call-comment",
+        input: { command: "python ./post_comment.py" },
+      });
+      emit({
+        event: "message",
+        type: "tool_result",
+        tool: "shell",
+        callId: "call-comment",
+        output: '{"status":"success","value":{"exitCode":0,"stderr":"Comment added to issue 01a0caf4.\\n"}}',
+      });
+      break;
+    case "cancel":
+    case "shutdown":
+      break;
+    default:
+      break;
+  }
+});
+`
+
+func TestCursorSdkCompletesWhenCommentAddCommandIsNotParsed(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	script := filepath.Join(dir, "hung-unparsed-comment-cursor-sdk-executor.js")
+	if err := os.WriteFile(script, []byte(hungAfterUnparsedCommentCursorSdkExecutorScript), 0o644); err != nil {
+		t.Fatalf("write hung unparsed executor: %v", err)
+	}
+
+	backend := mustCursorSdkBackend(t, script, 20*time.Millisecond)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+
+	session, err := backend.Execute(ctx, "do work", ExecOptions{
+		Cwd:   t.TempDir(),
+		Model: "composer-2",
+	})
+	if err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+
+	result, ok := readSessionResult(session.Result, 15*time.Second)
+	if !ok {
+		t.Fatal("timed out waiting for cursor sdk to complete after unparsed comment result")
+	}
+	if result.Status != "completed" {
+		t.Fatalf("status = %q, want completed (error=%q)", result.Status, result.Error)
+	}
+}
+
 const continueAfterCommentCursorSdkExecutorScript = `
 const readline = require("node:readline");
 const rl = readline.createInterface({ input: process.stdin, crlfDelay: Infinity });

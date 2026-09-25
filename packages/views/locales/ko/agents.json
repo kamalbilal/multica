@@ -181,6 +181,8 @@
     "avatar_label": "아바타",
     "name_label": "이름",
     "description_label": "설명",
+    "message_instructions_label": "메시지 지침",
+    "message_instructions_hint": "이 에이전트가 받는 모든 메시지의 시작 부분에 추가됩니다.",
     "change_avatar_aria": "아바타 변경",
     "avatar_updated_toast": "아바타를 업데이트했습니다",
     "avatar_upload_failed_toast": "아바타를 업로드하지 못했습니다",
@@ -282,6 +284,8 @@
     "name_placeholder": "예: 심층 리서치 에이전트",
     "description_label": "설명",
     "description_placeholder": "이 에이전트는 무엇을 하나요?",
+    "message_instructions_label": "메시지 지침",
+    "message_instructions_hint": "이 에이전트가 받는 모든 메시지의 시작 부분에 추가됩니다.",
     "visibility_label": "공개 범위",
     "access": {
       "label": "액세스",

@@ -31,6 +31,7 @@ func fullSourceAgent() map[string]any {
 		"runtime_id":   "runtime-1",
 		"description":  "a description",
 		"instructions": "some instructions",
+		"message_instructions": "Always reply in bullets.",
 		"conversation_starters": []any{
 			map[string]any{"label": "Review a PR", "prompt": "Review the open pull request."},
 		},
@@ -112,6 +113,9 @@ func TestAgentCopySameRuntimeCopiesPortableFields(t *testing.T) {
 	}
 	if gotBody["instructions"] != "some instructions" {
 		t.Errorf("instructions = %v", gotBody["instructions"])
+	}
+	if gotBody["message_instructions"] != "Always reply in bullets." {
+		t.Errorf("message_instructions = %v", gotBody["message_instructions"])
 	}
 	if !reflect.DeepEqual(gotBody["conversation_starters"], []any{
 		map[string]any{"label": "Review a PR", "prompt": "Review the open pull request."},
