@@ -1495,6 +1495,7 @@ type CreateCommentRequest struct {
 	// has ended, or cannot take additional input, is never swapped for another
 	// one: its agent keeps the normal trigger.
 	SteerTaskIDs []string `json:"steer_task_ids"`
+	DebugMode    bool     `json:"debug_mode,omitempty"`
 }
 
 type CommentTriggerPreviewRequest struct {
@@ -1775,13 +1776,20 @@ func (h *Handler) CreateComment(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	// A running turn receives text only, so a comment that carries files is
-	// always a normal trigger.
-	if len(attachmentIDs) > 0 {
+	// always a normal trigger. Debug must also start a new turn: steering
+	// into a live assignment run never creates an issue_debug_session.
+	if len(attachmentIDs) > 0 || req.DebugMode {
 		steerTaskIDs = nil
 	}
 
 	// Determine author identity: agent (via X-Agent-ID header) or member.
 	authorType, authorID := h.resolveActor(r, userID, uuidToString(issue.WorkspaceID))
+
+	if req.DebugMode {
+		if !h.rejectDebugModeIfUnavailable(w, r, issue, req.Content, parentComment, authorType, authorID, suppressAgentIDs) {
+			return
+		}
+	}
 
 	// sourceTaskID captures the agent's currently-executing task when it posts
 	// via the CLI (X-Task-ID header). Stamping it on the comment row keeps the
@@ -1987,7 +1995,7 @@ func (h *Handler) CreateComment(w http.ResponseWriter, r *http.Request) {
 	// The comment is already saved; a blocked mention must not fail the whole
 	// request. Surface the per-target outcomes so the client can show partial
 	// success instead of a silent no-op (MUL-4525 §2).
-	resp.TriggerOutcomes = h.triggerTasksForComment(r.Context(), issue, comment, parentComment, authorType, authorID, originatorUserID, suppressAgentIDs, steerTaskIDs)
+	resp.TriggerOutcomes = h.triggerCommentTasks(r.Context(), issue, comment, parentComment, authorType, authorID, originatorUserID, suppressAgentIDs, steerTaskIDs, req.DebugMode)
 	if len(steerTaskIDs) > 0 {
 		applyCommentSupplements(&resp, h.listCommentSupplements(r.Context(), issue.WorkspaceID, []pgtype.UUID{comment.ID})[uuidToString(comment.ID)])
 	}
@@ -2035,6 +2043,10 @@ func isNoteComment(content string) bool {
 // steerTaskIDs are the running turns the author chose: a recipient whose chosen
 // turn is still running receives this comment there instead of a follow-up run.
 func (h *Handler) triggerTasksForComment(ctx context.Context, issue db.Issue, comment db.Comment, parentComment *db.Comment, actorType, actorID, originatorUserID string, suppressAgentIDs, steerTaskIDs []pgtype.UUID) []CommentTriggerOutcome {
+	return h.triggerCommentTasks(ctx, issue, comment, parentComment, actorType, actorID, originatorUserID, suppressAgentIDs, steerTaskIDs, false)
+}
+
+func (h *Handler) triggerCommentTasks(ctx context.Context, issue db.Issue, comment db.Comment, parentComment *db.Comment, actorType, actorID, originatorUserID string, suppressAgentIDs, steerTaskIDs []pgtype.UUID, debugMode bool) []CommentTriggerOutcome {
 	if isNoteComment(comment.Content) {
 		return nil
 	}
@@ -2050,6 +2062,7 @@ func (h *Handler) triggerTasksForComment(ctx context.Context, issue db.Issue, co
 	for agentID, result := range steered {
 		enqueued[agentID] = result
 	}
+	h.ensureDebugSessionsForComment(ctx, issue, enqueued, debugMode)
 	return commentTriggerOutcomes(targets, enqueued)
 }
 

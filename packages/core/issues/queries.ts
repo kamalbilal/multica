@@ -30,6 +30,16 @@ export function issueTasksOptions(issueId: string) {
   });
 }
 
+export function issueDebugSessionOptions(issueId: string) {
+  return queryOptions({
+    queryKey: issueKeys.debugSession(issueId),
+    queryFn: () => api.getIssueDebugSession(issueId),
+    enabled: !!issueId,
+    staleTime: 5_000,
+    refetchOnWindowFocus: true,
+  });
+}
+
 export interface IssueSortParam {
   sort_by?: ListIssuesParams["sort_by"];
   sort_direction?: ListIssuesParams["sort_direction"];
@@ -192,6 +202,8 @@ export const issueKeys = {
   tasksAll: () => ["issues", "tasks"] as const,
   /** Per-issue task list (issue-detail Execution log section). */
   tasks: (issueId: string) => [...issueKeys.tasksAll(), issueId] as const,
+  debugSessionAll: () => ["issues", "debug-session"] as const,
+  debugSession: (issueId: string) => [...issueKeys.debugSessionAll(), issueId] as const,
   sourceContextPreview: (wsId: string, anchorCommentId: string) =>
     ["source-context", "preview", wsId, anchorCommentId] as const,
 };

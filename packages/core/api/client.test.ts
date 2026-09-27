@@ -1510,6 +1510,35 @@ describe("ApiClient", () => {
     expect(comment.supplement_task_id).toBe("task-1");
   });
 
+  it("posts debug_mode when starting a debug session from a comment", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({
+        id: "comment-1",
+        issue_id: "issue-1",
+        author_type: "member",
+        author_id: "user-1",
+        content: "Start a debug session.",
+        type: "comment",
+        parent_id: null,
+        reactions: [],
+        attachments: [],
+        created_at: "2026-06-05T00:00:00Z",
+        updated_at: "2026-06-05T00:00:00Z",
+      }), {
+        status: 201,
+        headers: { "Content-Type": "application/json" },
+      }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    const client = new ApiClient("https://api.example.test");
+    await client.createComment("issue-1", "Start a debug session.", "comment", undefined, undefined, undefined, undefined, true);
+    expect(fetchMock.mock.calls[0]?.[1]?.body).toBe(JSON.stringify({
+      content: "Start a debug session.",
+      type: "comment",
+      debug_mode: true,
+    }));
+  });
+
   it("falls back to an empty comment when the create response shape drifts", async () => {
     vi.stubGlobal(
       "fetch",

@@ -1,7 +1,7 @@
 "use client";
 
 import { Fragment, memo, useCallback, useEffect, useRef, useState, type ReactNode } from "react";
-import { CheckCircle2, ChevronRight, CornerUpLeft, ListChevronsDownUp, Copy, Link2, Loader2, MessageSquarePlus, MoreHorizontal, Pencil, RotateCcw, Trash2 } from "lucide-react";
+import { CheckCircle2, ChevronRight, CornerUpLeft, ListChevronsDownUp, Copy, Link2, Loader2, MessageSquarePlus, MoreHorizontal, Pencil, RotateCcw, Trash2, Bug } from "lucide-react";
 import { toast } from "sonner";
 import { Card } from "@multica/ui/components/ui/card";
 import { Button, buttonVariants } from "@multica/ui/components/ui/button";
@@ -58,6 +58,33 @@ import { useRunCommentMotion } from "./use-run-comment-motion";
 
 const commentActionClassName =
   "text-muted-foreground aria-expanded:bg-transparent aria-expanded:hover:bg-muted dark:aria-expanded:hover:bg-muted/50";
+
+function GenerateDebugSessionItem({
+  entry,
+  onGenerate,
+  unavailableAgentIds,
+}: {
+  entry: TimelineEntry;
+  onGenerate?: (entry: TimelineEntry) => void;
+  unavailableAgentIds?: ReadonlySet<string>;
+}) {
+  const { t } = useT("issues");
+  if (!onGenerate || entry.actor_type !== "agent") return null;
+  const available = !unavailableAgentIds?.has(entry.actor_id);
+  return (
+    <DropdownMenuItem
+      disabled={!available}
+      title={!available ? t(($) => $.comment.debug.requires_daemon) : undefined}
+      onClick={() => {
+        if (!available) return;
+        onGenerate(entry);
+      }}
+    >
+      <Bug className="h-3.5 w-3.5" aria-hidden />
+      {t(($) => $.comment.debug.generate)}
+    </DropdownMenuItem>
+  );
+}
 
 const highlightedCommentBackgroundClass =
   "bg-[color-mix(in_srgb,var(--card)_95%,var(--brand)_5%)]";
@@ -124,7 +151,10 @@ interface CommentCardProps {
    * `CommentRow` has to rerun the rule per row.
    */
   canModerate?: boolean;
-  onReply: (parentId: string, content: string, attachmentIds?: string[], suppressAgentIds?: string[], steerTaskIds?: string[]) => Promise<string | boolean>;
+  onReply: (parentId: string, content: string, attachmentIds?: string[], suppressAgentIds?: string[], steerTaskIds?: string[], debugMode?: boolean) => Promise<string | boolean>;
+  onGenerateDebugSession?: (entry: TimelineEntry) => void;
+  /** Agent ids whose bound runtime recorded capabilities without debug-ingest-v1. */
+  debugIngestUnavailableAgentIds?: ReadonlySet<string>;
   onReplyAccepted?: (commentId: string) => void;
   onEdit: (commentId: string, content: string, attachmentIds: string[], suppressAgentIds?: string[], contentBase?: string) => Promise<void>;
   onDelete: (commentId: string) => void;
@@ -136,12 +166,6 @@ interface CommentCardProps {
   onCopyLink?: (commentId: string) => void;
   /** Scroll to and flash a comment in this thread. */
   onJumpToComment?: (commentId: string) => void;
-  /**
-   * When non-null, the thread root is currently rendered as a resolved-but-
-   * expanded card. Pass a "Collapse" affordance into the header so the user
-   * can fold the thread back to the bar; the parent owns the session state.
-   */
-  onCollapseResolved?: () => void;
   /**
    * Per-session set of thread ROOT ids whose reply-resolution fold is expanded.
    * Used only when a REPLY is the resolution (root-resolution folding is handled
@@ -613,6 +637,8 @@ function CommentRow({
   onDelete,
   onToggleReaction,
   onCreateSubIssue,
+  onGenerateDebugSession,
+  debugIngestUnavailableAgentIds,
   onResolveToggle,
   onCopyLink,
 }: {
@@ -633,6 +659,8 @@ function CommentRow({
   onDelete: (commentId: string) => void;
   onToggleReaction: (commentId: string, emoji: string) => void;
   onCreateSubIssue?: (commentId: string) => void;
+  onGenerateDebugSession?: (entry: TimelineEntry) => void;
+  debugIngestUnavailableAgentIds?: ReadonlySet<string>;
   onResolveToggle?: (commentId: string, resolved: boolean) => void;
   onCopyLink?: (commentId: string) => void;
 }) {
@@ -768,6 +796,11 @@ function CommentRow({
                   {t(($) => $.source_context.create_action)}
                 </DropdownMenuItem>
               )}
+              <GenerateDebugSessionItem
+                entry={entry}
+                onGenerate={onGenerateDebugSession}
+                unavailableAgentIds={debugIngestUnavailableAgentIds}
+              />
               {canDeleteEntry && (
                 <>
                   <DropdownMenuSeparator />
@@ -990,10 +1023,11 @@ function CommentCardImpl({
   onDelete,
   onToggleReaction,
   onCreateSubIssue,
+  onGenerateDebugSession,
+  debugIngestUnavailableAgentIds,
   onResolveToggle,
   onCopyLink,
   onJumpToComment,
-  onCollapseResolved,
   expandedResolvedIds,
   onResolvedExpandChange,
   highlightedCommentId,
@@ -1057,7 +1091,8 @@ function CommentCardImpl({
       replyTo={row.replyTo && <ReplyToQuote entry={row.replyTo} onJump={onJumpToComment} />}
       commentProps={row.reply ? {
         issueId, entry: row.reply, replies: [], currentUserId, canModerate, onReply, onEdit, onDelete,
-        onToggleReaction, onCreateSubIssue, onResolveToggle, onCopyLink, highlightedCommentId, enteringRunIds,
+        onToggleReaction, onCreateSubIssue, onGenerateDebugSession, debugIngestUnavailableAgentIds,
+        onResolveToggle, onCopyLink, highlightedCommentId, enteringRunIds,
       } : undefined} />
   ) : renderReply(row);
 
@@ -1087,6 +1122,8 @@ function CommentCardImpl({
             onDelete={onDelete}
             onToggleReaction={onToggleReaction}
             onCreateSubIssue={onCreateSubIssue}
+            onGenerateDebugSession={onGenerateDebugSession}
+            debugIngestUnavailableAgentIds={debugIngestUnavailableAgentIds}
             onResolveToggle={onResolveToggle}
             onCopyLink={onCopyLink}
           />
@@ -1134,8 +1171,9 @@ function CommentCardImpl({
   // header whenever a resolution collapse bar already owns the top-0 sticky slot
   // (root resolved + expanded, or reply-resolution expanded): two sticky bars at
   // the same offset would stack and hide one.
+  const expandedResolvedRoot = !!entry.resolved_at;
   const stickyHeader =
-    open && !onCollapseResolved && !(replyResolutionId != null && threadExpanded);
+    open && !expandedResolvedRoot && !(replyResolutionId != null && threadExpanded);
 
   return (
     // overflow-clip (not -hidden) clips the rounded corners WITHOUT creating a
@@ -1143,10 +1181,10 @@ function CommentCardImpl({
     // timeline's scroll parent instead of this card. See PR #3623.
     <Card ref={annotation.cardRef} {...annotation.captureProps} className="!py-0 !gap-0 overflow-clip transition-colors duration-700">
       {annotation.popup}
-      {onCollapseResolved && (
+      {expandedResolvedRoot && onResolvedExpandChange ? (
         <button
           type="button"
-          onClick={onCollapseResolved}
+          onClick={() => onResolvedExpandChange(entry.id, false)}
           data-thread-sticky-bar
           className="sticky top-0 z-20 flex w-full items-center gap-2.5 border-b border-border/50 bg-muted px-4 max-md:px-3 py-2.5 text-left text-body text-muted-foreground transition-colors cursor-pointer hover:bg-accent hover:text-accent-foreground"
           aria-label={t(($) => $.comment.resolve.collapse)}
@@ -1154,7 +1192,7 @@ function CommentCardImpl({
           <ListChevronsDownUp className="h-3.5 w-3.5" />
           {t(($) => $.comment.resolve.collapse)}
         </button>
-      )}
+      ) : null}
       {/* root-section — the sticky header's containing block. It wraps ONLY
             the header + root body, so the header releases the moment you scroll
             past the body into the replies (which render OUTSIDE this wrapper).
@@ -1296,6 +1334,11 @@ function CommentCardImpl({
                           {t(($) => $.source_context.create_action)}
                         </DropdownMenuItem>
                       )}
+                      <GenerateDebugSessionItem
+                        entry={entry}
+                        onGenerate={onGenerateDebugSession}
+                        unavailableAgentIds={debugIngestUnavailableAgentIds}
+                      />
                       {canDeleteEntry && (
                         <>
                           <DropdownMenuSeparator />
@@ -1483,7 +1526,7 @@ function CommentCardImpl({
                   draftKey={`reply:${issueId}:${entry.id}`}
                   onEditAnnotation={(id) => annotation.editAnnotation(id, true)}
                   steerByDefault={steerThreadRunByDefault}
-                  onSubmit={(content, attachmentIds, suppressAgentIds, steerTaskIds) => replyTargetMissing ? Promise.resolve(false) : onReply(replyTargetId, content, attachmentIds, suppressAgentIds, steerTaskIds)}
+                  onSubmit={(content, attachmentIds, suppressAgentIds, steerTaskIds, debugMode) => replyTargetMissing ? Promise.resolve(false) : onReply(replyTargetId, content, attachmentIds, suppressAgentIds, steerTaskIds, debugMode)}
                   onAccepted={onReplyAccepted}
                 />
               </div>

@@ -1,5 +1,6 @@
 import { describe, it, expect } from "vitest";
 import {
+  agentRuntimeAdvertisesDebugIngest,
   chatProjectContextSupported,
   checkQuickCreateCliVersion,
   checkQuickCreateFieldsCliVersion,
@@ -150,5 +151,30 @@ describe("runtimeAdvertisesLocalWorktree", () => {
     expect(runtimeAdvertisesLocalWorktree(other, "d1")).toBe(false);
     expect(runtimeAdvertisesLocalWorktree([], "d1")).toBe(false);
     expect(runtimeAdvertisesLocalWorktree(other, null)).toBe(false);
+  });
+});
+
+describe("agentRuntimeAdvertisesDebugIngest", () => {
+  it("returns false only when capabilities were recorded without debug-ingest-v1", () => {
+    const agent = { runtime_id: "rt-1" };
+    expect(
+      agentRuntimeAdvertisesDebugIngest(agent, [
+        { id: "rt-1", metadata: { capabilities: ["skill-bundles-v1"] } },
+      ]),
+    ).toBe(false);
+    expect(
+      agentRuntimeAdvertisesDebugIngest(agent, [
+        { id: "rt-1", metadata: { capabilities: ["debug-ingest-v1"] } },
+      ]),
+    ).toBe(true);
+  });
+
+  it("returns null when capabilities were never recorded", () => {
+    const agent = { runtime_id: "rt-1" };
+    expect(agentRuntimeAdvertisesDebugIngest(agent, [{ id: "rt-1", metadata: {} }])).toBe(null);
+    expect(agentRuntimeAdvertisesDebugIngest(agent, [])).toBe(null);
+    expect(agentRuntimeAdvertisesDebugIngest({}, [{ id: "rt-1", metadata: { capabilities: [] } }])).toBe(
+      null,
+    );
   });
 });

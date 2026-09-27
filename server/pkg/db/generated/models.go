@@ -828,6 +828,28 @@ type Issue struct {
 	DuplicateOfIssueID pgtype.UUID        `json:"duplicate_of_issue_id"`
 }
 
+type IssueDebugSession struct {
+	ID                pgtype.UUID        `json:"id"`
+	WorkspaceID       pgtype.UUID        `json:"workspace_id"`
+	IssueID           pgtype.UUID        `json:"issue_id"`
+	AgentID           pgtype.UUID        `json:"agent_id"`
+	SourceTaskID      pgtype.UUID        `json:"source_task_id"`
+	WaitCommentID     pgtype.UUID        `json:"wait_comment_id"`
+	Status            string             `json:"status"`
+	Hypotheses        []byte             `json:"hypotheses"`
+	ReproSteps        string             `json:"repro_steps"`
+	ProbePaths        []byte             `json:"probe_paths"`
+	ContinueAction    string             `json:"continue_action"`
+	ContinueCommentID pgtype.UUID        `json:"continue_comment_id"`
+	LogDump           string             `json:"log_dump"`
+	IngestToken       string             `json:"ingest_token"`
+	WorkDirHint       string             `json:"work_dir_hint"`
+	Revision          int64              `json:"revision"`
+	CreatedAt         pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt         pgtype.Timestamptz `json:"updated_at"`
+	EventCount        int32              `json:"event_count"`
+}
+
 type IssueDependency struct {
 	ID               pgtype.UUID `json:"id"`
 	IssueID          pgtype.UUID `json:"issue_id"`

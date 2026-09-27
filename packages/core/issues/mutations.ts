@@ -833,6 +833,7 @@ export function useCreateComment(issueId: string) {
       attachmentIds,
       suppressAgentIds,
       steerTaskIds,
+      debugMode,
     }: {
       content: string;
       type?: string;
@@ -841,7 +842,8 @@ export function useCreateComment(issueId: string) {
       suppressAgentIds?: string[];
       /** Running turns this comment goes into instead of a follow-up run. */
       steerTaskIds?: string[];
-    }) => api.createComment(issueId, content, type, parentId, attachmentIds, suppressAgentIds, steerTaskIds),
+      debugMode?: boolean;
+    }) => api.createComment(issueId, content, type, parentId, attachmentIds, suppressAgentIds, steerTaskIds, debugMode),
     onSuccess: (comment) => {
       if (comment.issue_revision) {
         onIssueAuxiliaryRevision(qc, wsId, issueId, comment.issue_revision);
@@ -883,6 +885,7 @@ export function useCreateComment(issueId: string) {
       // task now dedupes follow-up triggers), so cached previews for this
       // issue are stale the moment the create lands.
       qc.invalidateQueries({ queryKey: issueKeys.commentTriggerPreview(issueId) });
+      qc.invalidateQueries({ queryKey: issueKeys.debugSession(issueId) });
     },
     // No onSettled invalidate. The `comment:created` WS broadcast keeps
     // the timeline cache fresh after a successful create, and reconnect
@@ -1237,5 +1240,33 @@ export function useRetryIssueRun(issueId: string) {
   return useMutation({
     mutationFn: (taskId: string) => api.rerunIssue(issueId, taskId),
     onSuccess: () => client.invalidateQueries({ queryKey: issueKeys.tasks(issueId) }),
+  });
+}
+
+export function useContinueIssueDebugSession(issueId: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({
+      action,
+      content,
+    }: {
+      action: "reproduced" | "comment" | "fixed";
+      content?: string;
+    }) => api.continueIssueDebugSession(issueId, action, content),
+    onSuccess: (envelope) => {
+      qc.setQueryData(issueKeys.debugSession(issueId), envelope);
+      qc.invalidateQueries({ queryKey: issueKeys.timeline(issueId) });
+      qc.invalidateQueries({ queryKey: issueKeys.tasks(issueId) });
+    },
+  });
+}
+
+export function useCloseIssueDebugSession(issueId: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: () => api.closeIssueDebugSession(issueId),
+    onSuccess: (envelope) => {
+      qc.setQueryData(issueKeys.debugSession(issueId), envelope);
+    },
   });
 }

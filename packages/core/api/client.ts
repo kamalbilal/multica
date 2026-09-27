@@ -464,6 +464,8 @@ import {
   EMPTY_SHARE_LINK,
   EMPTY_SHARE_LINK_INFO,
   EMPTY_JOIN_SHARE_LINK_RESPONSE,
+  IssueDebugSessionEnvelopeSchema,
+  type IssueDebugSessionEnvelope,
   type IssueView,
   type IssueViewPreference,
   type CreateIssueViewRequest,
@@ -1542,6 +1544,7 @@ export class ApiClient {
     attachmentIds?: string[],
     suppressAgentIds?: string[],
     steerTaskIds?: string[],
+    debugMode?: boolean,
   ): Promise<Comment> {
     const raw = await this.fetch<unknown>(`/api/issues/${issueId}/comments`, {
       method: "POST",
@@ -1552,10 +1555,45 @@ export class ApiClient {
         ...(attachmentIds?.length ? { attachment_ids: attachmentIds } : {}),
         ...(suppressAgentIds?.length ? { suppress_agent_ids: suppressAgentIds } : {}),
         ...(steerTaskIds?.length ? { steer_task_ids: steerTaskIds } : {}),
+        ...(debugMode ? { debug_mode: true } : {}),
       }),
     });
     return parseWithFallback(raw, CommentSchema, EMPTY_COMMENT, {
       endpoint: "POST /api/issues/:id/comments",
+    });
+  }
+
+  async getIssueDebugSession(issueId: string) {
+    const raw = await this.fetch<unknown>(`/api/issues/${issueId}/debug`);
+    return parseWithFallback<IssueDebugSessionEnvelope>(raw, IssueDebugSessionEnvelopeSchema, { session: null }, {
+      endpoint: "GET /api/issues/:id/debug",
+    });
+  }
+
+  async continueIssueDebugSession(
+    issueId: string,
+    action: "reproduced" | "comment" | "fixed",
+    content?: string,
+  ) {
+    const raw = await this.fetch<unknown>(`/api/issues/${issueId}/debug/continue`, {
+      method: "POST",
+      body: JSON.stringify({
+        action,
+        ...(content ? { content } : {}),
+      }),
+    });
+    return parseWithFallback<IssueDebugSessionEnvelope>(raw, IssueDebugSessionEnvelopeSchema, { session: null }, {
+      endpoint: "POST /api/issues/:id/debug/continue",
+    });
+  }
+
+  async closeIssueDebugSession(issueId: string) {
+    const raw = await this.fetch<unknown>(`/api/issues/${issueId}/debug/close`, {
+      method: "POST",
+      body: JSON.stringify({}),
+    });
+    return parseWithFallback<IssueDebugSessionEnvelope>(raw, IssueDebugSessionEnvelopeSchema, { session: null }, {
+      endpoint: "POST /api/issues/:id/debug/close",
     });
   }
 

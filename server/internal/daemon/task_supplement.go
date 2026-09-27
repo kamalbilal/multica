@@ -101,8 +101,8 @@ Treat this as additional guidance for the same active task, not as a replacement
 - Replace or cancel the original objective only if the human explicitly asks for replacement or cancellation.
 
 Human message:
-%s`, strconv.Quote(authorName), content)
-	return prependStandingMessageInstructions(body, messageInstructions)
+%s`, strconv.Quote(authorName), formatInboundMessageContent(messageInstructions, content))
+	return body
 }
 
 func taskSupplementEndpointUnsupported(err error) bool {

@@ -1108,6 +1108,39 @@ export const CommentSchema = z.object({
 
 export const CommentsListSchema = z.array(CommentSchema);
 
+export const IssueDebugHypothesisSchema = z.object({
+  id: z.string().optional().catch(undefined),
+  text: z.string().optional().catch(undefined),
+}).loose();
+
+export const IssueDebugSessionSchema = z.object({
+  id: z.string(),
+  issue_id: z.string().default(""),
+  agent_id: z.string().default(""),
+  source_task_id: z.string().optional().catch(undefined),
+  wait_comment_id: z.string().optional().catch(undefined),
+  status: z.string(),
+  hypotheses: z.array(z.unknown()).catch([]),
+  repro_steps: z.string().default(""),
+  probe_paths: z.array(z.unknown()).catch([]),
+  continue_action: z.string().optional().catch(undefined),
+  continue_comment_id: z.string().optional().catch(undefined),
+  work_dir_hint: z.string().optional().catch(undefined),
+  event_count: z.number().int().nonnegative().catch(0),
+  revision: z.number().optional().catch(undefined),
+  created_at: z.string().default(""),
+  updated_at: z.string().default(""),
+}).loose();
+
+export const IssueDebugSessionEnvelopeSchema = z.object({
+  session: IssueDebugSessionSchema.nullable().catch(null),
+}).loose();
+
+export type IssueDebugSession = z.infer<typeof IssueDebugSessionSchema>;
+export type IssueDebugSessionEnvelope = {
+  session: IssueDebugSession | null;
+};
+
 // Degraded placeholder for a comment response that failed schema validation.
 // The empty id is the caller's signal that nothing usable came back — the run
 // UI treats it as "could not read the result" rather than a successful run.

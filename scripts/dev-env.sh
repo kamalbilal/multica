@@ -480,12 +480,24 @@ database_url_with_name() {
 # Diagnoses the failure mode this whole script exists to make impossible:
 # something other than the container owns 5432, so the container never bound
 # the host port and a docker-exec create landed in the wrong server.
+database_url_port() {
+  local db_port="${POSTGRES_PORT:-5432}"
+  if [ -n "${DATABASE_URL:-}" ]; then
+    db_port="$(node -e '
+      const url = new URL(process.argv[1]);
+      process.stdout.write(url.port || "5432");
+    ' "$DATABASE_URL" 2>/dev/null || echo "$db_port")"
+  fi
+  printf '%s' "$db_port"
+}
+
 diagnose_database() {
-  local owner
-  owner="$(lsof -nP -iTCP:"${POSTGRES_PORT:-5432}" -sTCP:LISTEN 2>/dev/null | awk 'NR==2 {print $1" (pid "$2", user "$3")"}')"
+  local owner db_port
+  db_port="$(database_url_port)"
+  owner="$(lsof -nP -iTCP:"${db_port}" -sTCP:LISTEN 2>/dev/null | awk 'NR==2 {print $1" (pid "$2", user "$3")"}')"
   printf '\n'
   warn "The database the tooling created is not the one the application reaches."
-  info "Port ${POSTGRES_PORT:-5432} is served by: ${owner:-nothing}"
+  info "Port ${db_port} is served by: ${owner:-nothing}"
   info "DATABASE_URL: ${DATABASE_URL}"
   info "If that is a native PostgreSQL, the Docker container never bound the host port."
   info "Either stop it (brew services stop postgresql@17) or point DATABASE_URL at it."
@@ -505,8 +517,11 @@ ensure_database() {
       info "Created database ${POSTGRES_DB} through DATABASE_URL."
     fi
   else
-    info "Nothing is answering on ${POSTGRES_PORT:-5432} yet; starting the shared container."
-    bash "$REPO_ROOT/scripts/ensure-postgres.sh" "$ENV_FILE" | sed 's/^/    /'
+    local db_port
+    db_port="$(database_url_port)"
+    info "Nothing is answering on ${db_port} yet; starting the shared container."
+    DATABASE_URL="${DATABASE_URL:-}" POSTGRES_PORT="$db_port" POSTGRES_DB="${POSTGRES_DB:-$DB_NAME}" \
+      bash "$REPO_ROOT/scripts/ensure-postgres.sh" "$ENV_FILE" | sed 's/^/    /'
   fi
 }
 

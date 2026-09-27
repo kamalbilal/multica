@@ -12,6 +12,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/multica-ai/multica/server/internal/daemon/debugingest"
 	"github.com/multica-ai/multica/server/internal/daemon/execenv"
 	"github.com/multica-ai/multica/server/internal/daemon/processtree"
 	"github.com/multica-ai/multica/server/internal/daemon/repocache"
@@ -94,6 +95,7 @@ func (d *Daemon) runGC(ctx context.Context) {
 	}
 
 	stats := &gcStats{byPattern: map[string]int{}}
+	d.reapClosedDebugHolds(ctx)
 	for _, wsEntry := range entries {
 		// Skip every daemon-internal dot directory, not just .repos. A
 		// workspace directory is always a UUID, so a dot-prefixed entry is one
@@ -552,6 +554,31 @@ func isAccessNotFound(err error) bool {
 	return errors.As(err, &reqErr) && reqErr.StatusCode == http.StatusNotFound
 }
 
+func (d *Daemon) reapClosedDebugHolds(ctx context.Context) {
+	if d.client == nil || d.cfg.WorkspacesRoot == "" {
+		return
+	}
+	for _, sessionID := range debugingest.ListHeldSessionIDs(d.cfg.WorkspacesRoot) {
+		if ctx.Err() != nil {
+			return
+		}
+		issueID := debugingest.ReadHoldIssueID(d.cfg.WorkspacesRoot, sessionID)
+		if issueID == "" {
+			continue
+		}
+		status, err := d.client.GetDebugSessionStatus(ctx, issueID, sessionID)
+		if err != nil {
+			if isAccessNotFound(err) {
+				debugingest.ClearHold(d.cfg.WorkspacesRoot, sessionID)
+			}
+			continue
+		}
+		if status == "closed" {
+			debugingest.ClearHold(d.cfg.WorkspacesRoot, sessionID)
+		}
+	}
+}
+
 func (d *Daemon) gcDecisionIssue(ctx context.Context, taskDir string, meta *execenv.GCMeta) gcAction {
 	if strings.TrimSpace(meta.IssueID) == "" {
 		return d.orphanByMTime(taskDir, "empty issue id")
@@ -581,6 +608,10 @@ func (d *Daemon) gcDecisionIssue(ctx context.Context, taskDir string, meta *exec
 func (d *Daemon) gcDecisionIssueResult(taskDir string, meta *execenv.GCMeta, result IssueGCCheckResult) gcAction {
 	if !result.Found {
 		return d.orphanByMTime(taskDir, "issue not accessible")
+	}
+
+	if strings.TrimSpace(meta.DebugSessionID) != "" && debugingest.HasHold(d.cfg.WorkspacesRoot, meta.DebugSessionID) {
+		return gcActionSkip
 	}
 
 	terminal, recognized := issueGCLifecycle(result)

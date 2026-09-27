@@ -13,8 +13,13 @@
 // skip the build and fall through to auto-install at runtime. A genuine
 // Go compile error is fatal — you want that to block dev, not hide.
 
-import { access, chmod, copyFile, mkdir, rm } from "node:fs/promises";
+import { access, chmod, mkdir } from "node:fs/promises";
 import { constants } from "node:fs";
+import {
+  clearBundledCliDestination,
+  installBundledBinary,
+  stopDesktopProfileDaemons,
+} from "./bundled-cli-install.mjs";
 import { execFileSync, execSync } from "node:child_process";
 import { homedir } from "node:os";
 import { dirname, join, resolve } from "node:path";
@@ -163,13 +168,14 @@ if (!(await exists(srcBinary))) {
     `[bundle-cli] ${srcBinary} not present — Desktop will fall back to ` +
       `auto-installing the latest release at runtime.`,
   );
-  await rm(destDir, { recursive: true, force: true });
+  await clearBundledCliDestination(destBinary);
   process.exit(0);
 }
 
-await rm(destDir, { recursive: true, force: true });
-await mkdir(destDir, { recursive: true });
-await copyFile(srcBinary, destBinary);
+// Stop Desktop profile daemons before replacing the bundled binary so Windows
+// does not EPERM on unlink when preview:desktop rebuilds on every launch.
+stopDesktopProfileDaemons(srcBinary);
+await installBundledBinary(srcBinary, destBinary);
 await chmod(destBinary, 0o755);
 
 // macOS: ad-hoc sign so Gatekeeper doesn't complain when the parent app

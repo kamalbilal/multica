@@ -318,6 +318,9 @@
   },
   "issue": {
     "description": "各作成ダイアログのツールバーに常時表示するフィールドを選択します。非表示のフィールドは ⋯ メニューから引き続き使用でき、値がある間は自動的に表示されます。",
+    "debug_title": "デバッグ",
+    "debug_kickoff_label": "デバッグセッションを生成",
+    "debug_kickoff_hint": "エージェントのメンションは自動で付きます。",
     "quick_create_title": "エージェントで作成する際のツールバー項目",
     "manual_create_title": "手動作成ツールバーの項目",
     "fields": {

@@ -93,6 +93,7 @@ import { issueTasksOptions } from "@multica/core/issues/queries";
 import { SourceContextBadge } from "./source-context-viewer";
 import { RevisionConflictCompare } from "./revision-conflict-compare";
 import { CommentInput } from "./comment-input";
+import { DebugSessionCard } from "./debug-session-card";
 import { useCommentAnnotations } from "./use-comment-annotations";
 import { CurrentIssueRenderContextProvider } from "../current-issue-render-context";
 import { ResolvedThreadBar } from "./resolved-thread-bar";
@@ -118,6 +119,7 @@ import { ProjectIcon } from "../../projects/components/project-icon";
 import { issueLabelsOptions } from "@multica/core/labels";
 import { propertyListOptions } from "@multica/core/properties";
 import { memberListOptions, agentListOptions } from "@multica/core/workspace/queries";
+import { runtimeListOptions, agentRuntimeAdvertisesDebugIngest } from "@multica/core/runtimes";
 import {
   selectExpandedResolved,
   useCommentCollapseStore,
@@ -1258,6 +1260,16 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
   const wsId = useWorkspaceId();
   const { data: members = [] } = useQuery(memberListOptions(wsId));
   const { data: agents = [] } = useQuery(agentListOptions(wsId));
+  const { data: runtimes = [] } = useQuery(runtimeListOptions(wsId));
+  const debugIngestUnavailableAgentIds = useMemo(() => {
+    const ids = new Set<string>();
+    for (const agent of agents) {
+      if (agentRuntimeAdvertisesDebugIngest(agent, runtimes) === false) {
+        ids.add(agent.id);
+      }
+    }
+    return ids;
+  }, [agents, runtimes]);
   // Workspace owners and admins moderate any comment authored by anyone
   // (mirrors backend `comment.go:507-512`). Computed here so per-comment
   // rendering doesn't have to re-derive it for every row.
@@ -1546,7 +1558,7 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
   const {
     timeline, loading: timelineLoading,
     submitComment, submitReply,
-    editComment, deleteComment, toggleResolveComment, toggleReaction: handleToggleReaction,
+    editComment, deleteComment, generateDebugSession, toggleResolveComment, toggleReaction: handleToggleReaction,
   } = useIssueTimeline(id, user?.id);
 
   const { data: commentTasks } = useQuery(issueTasksOptions(id));
@@ -2421,6 +2433,14 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
 
   useRightSidebarShortcut(rightSidebarShortcutTargetRef, handleToggleSidebar);
 
+  const renderItemRef = useRef<(index: number, item: TimelineItem) => React.ReactElement>(
+    () => <></>,
+  );
+  const itemContent = useCallback(
+    (index: number, item: TimelineItem) => renderItemRef.current(index, item),
+    [],
+  );
+
   useIssueDetailScrollRestore({
     restoreKey: `${wsId}:${id}`,
     scrollContainerEl,
@@ -2858,9 +2878,10 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
             currentUserId: user?.id, canModerate: canModerateComments, onReply: submitReply,
             onReplyAccepted: scrollToTimelineBottom, onEdit: editComment, onDelete: deleteComment,
             onToggleReaction: handleToggleReaction, onCreateSubIssue: openCommentSubIssue,
+            onGenerateDebugSession: generateDebugSession,
+            debugIngestUnavailableAgentIds,
             onResolveToggle: handleResolveToggle,
             onCopyLink: actions.copyCommentLink, onJumpToComment: jumpToComment,
-            onCollapseResolved: reply.resolved_at ? () => toggleResolvedExpand(reply.id, false) : undefined,
             expandedResolvedIds: expandedResolved, onResolvedExpandChange: toggleResolvedExpand,
             highlightedCommentId: highlightedId,
             runs: commentRuns.get(reply.id) ?? EMPTY_COMMENT_RUNS, enteringRunIds,
@@ -2879,7 +2900,6 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
       );
     }
     if (item.kind === "comment") {
-      const isResolved = !!item.entry.resolved_at;
       return (
         <div className="pb-3" id={`comment-${item.id}`}>
           <CommentCard
@@ -2896,10 +2916,11 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
             onDelete={deleteComment}
             onToggleReaction={handleToggleReaction}
             onCreateSubIssue={openCommentSubIssue}
+            onGenerateDebugSession={generateDebugSession}
+            debugIngestUnavailableAgentIds={debugIngestUnavailableAgentIds}
             onResolveToggle={handleResolveToggle}
             onCopyLink={actions.copyCommentLink}
             onJumpToComment={jumpToComment}
-            onCollapseResolved={isResolved ? () => toggleResolvedExpand(item.id, false) : undefined}
             expandedResolvedIds={expandedResolved}
             onResolvedExpandChange={toggleResolvedExpand}
             highlightedCommentId={highlightedId}
@@ -2934,6 +2955,8 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
       />
     );
   };
+
+  renderItemRef.current = renderItem;
 
   // Breadcrumb shows the single most-direct container, never a fabricated chain.
   // project_id and parent_issue_id are orthogonal (a sub-issue can live in a
@@ -3639,7 +3662,7 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
                       // it as a sticky "is at bottom" flag and resets
                       // scrollTop to maxScrollTop on every height-change
                       // tick — issue-detail is document-shaped, not chat.
-                      itemContent={renderItem}
+                      itemContent={itemContent}
                     />
                   </div>
                 )
@@ -3647,7 +3670,7 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
                 <div className="mt-4">
                   {items.map((item, i) => (
                     <Fragment key={`${item.kind}:${item.kind === "run" ? item.run.task.id : item.id}`}>
-                      {renderItem(i, item)}
+                      {itemContent(i, item)}
                     </Fragment>
                   ))}
                 </div>
@@ -3682,6 +3705,7 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
                 keeps the previous issue's in-memory content and the
                 next keystroke would flush it into the new issue's
                 draft key. */}
+            <DebugSessionCard issueId={id} />
             <CommentInput
               key={id}
               issueId={id}

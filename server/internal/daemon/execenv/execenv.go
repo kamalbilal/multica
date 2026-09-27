@@ -1111,6 +1111,9 @@ type GCMeta struct {
 	// the agent did in their own tree). Pattern-based artifact cleanup is
 	// still allowed.
 	LocalDirectory bool `json:"local_directory,omitempty"`
+	// DebugSessionID, when set, is an open debug session whose hold file
+	// must keep this env root until the human continues or closes it.
+	DebugSessionID string `json:"debug_session_id,omitempty"`
 }
 
 const gcMetaFile = ".gc_meta.json"

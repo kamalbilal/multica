@@ -318,6 +318,9 @@
   },
   "issue": {
     "description": "Choisissez les champs que chaque fenêtre de création garde dans sa barre d'outils. Les champs masqués restent accessibles depuis le menu ⋯ et réapparaissent tant qu'ils contiennent une valeur.",
+    "debug_title": "Debug",
+    "debug_kickoff_label": "Générer une session de debug",
+    "debug_kickoff_hint": "La mention de l'agent est ajoutée automatiquement.",
     "quick_create_title": "Champs de la barre de création avec un agent",
     "manual_create_title": "Champs de la barre de création manuelle",
     "fields": {

@@ -66,6 +66,10 @@ const (
 	// It is persisted when this exact task enters running; absence always means
 	// unsupported so mixed server/daemon versions fail closed.
 	DaemonCapabilityTaskSupplementV1 = "task-supplement-v1"
+	// DaemonCapabilityDebugIngestV1 advertises a loopback NDJSON ingest for
+	// issue debug sessions (CORS-safe POST of probe events). Starting Debug
+	// against a runtime without it fails closed.
+	DaemonCapabilityDebugIngestV1 = "debug-ingest-v1"
 
 	TaskSupplementFailureTurnNotStarted   = "turn_not_started"
 	TaskSupplementFailureProviderRejected = "provider_rejected"

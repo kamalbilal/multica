@@ -15,6 +15,7 @@ const (
 	EventCommentDeleted       = "comment:deleted"
 	EventCommentResolved      = "comment:resolved"
 	EventCommentUnresolved    = "comment:unresolved"
+	EventDebugSessionUpdated  = "debug_session:updated"
 	EventReactionAdded        = "reaction:added"
 	EventReactionRemoved      = "reaction:removed"
 	EventIssueReactionAdded   = "issue_reaction:added"

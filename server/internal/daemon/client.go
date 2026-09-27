@@ -213,6 +213,7 @@ func daemonCommonCapabilities() []string {
 		protocol.DaemonCapabilityRPCV1,
 		protocol.DaemonCapabilityPlatformSkillV1,
 		protocol.DaemonCapabilityCheckoutKeepsWorkV1,
+		protocol.DaemonCapabilityDebugIngestV1,
 	}
 }
 
@@ -968,6 +969,30 @@ func (c *Client) GetIssueGCCheck(ctx context.Context, issueID string) (*IssueGCS
 		return nil, err
 	}
 	return &resp, nil
+}
+
+func (c *Client) PutDebugSessionLogs(ctx context.Context, issueID, sessionID, dump string) error {
+	return c.postJSON(ctx, fmt.Sprintf("/api/daemon/issues/%s/debug-logs", issueID), map[string]string{
+		"session_id": sessionID,
+		"log_dump":   dump,
+	}, nil)
+}
+
+func (c *Client) PutDebugSessionEventCount(ctx context.Context, issueID, sessionID string, count int) error {
+	return c.postJSON(ctx, fmt.Sprintf("/api/daemon/issues/%s/debug-events", issueID), map[string]any{
+		"session_id":  sessionID,
+		"event_count": count,
+	}, nil)
+}
+
+func (c *Client) GetDebugSessionStatus(ctx context.Context, issueID, sessionID string) (string, error) {
+	var resp struct {
+		Status string `json:"status"`
+	}
+	if err := c.getJSON(ctx, fmt.Sprintf("/api/daemon/issues/%s/debug-sessions/%s", issueID, sessionID), &resp); err != nil {
+		return "", err
+	}
+	return resp.Status, nil
 }
 
 // ChatSessionGCStatus mirrors IssueGCStatus for chat sessions.

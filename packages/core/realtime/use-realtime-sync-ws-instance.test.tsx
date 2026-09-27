@@ -117,15 +117,15 @@ describe("useRealtimeSync — ws instance change", () => {
     rerender({ ws: ws2 });
 
     // Should have called invalidateQueries for all workspace-scoped keys
-    // (16 workspace-scoped [incl. property definitions] + 6 per-issue
+    // (16 workspace-scoped [incl. property definitions] + 7 per-issue
     // prefixes + the workspace working-agents projection + 5 per-chat
     // prefixes + 1 workspaceKeys.list() + 1 cross-workspace inbox unread
-    // summary = 31 calls).
+    // summary = 32 calls).
     //
     // Awaited rather than counted synchronously: the inbox unread summary
     // refresh cancels any in-flight request before invalidating (see
     // onInboxSummaryInvalidate), so that one lands after the synchronous ones.
-    await waitFor(() => expect(invalidateSpy).toHaveBeenCalledTimes(31));
+    await waitFor(() => expect(invalidateSpy).toHaveBeenCalledTimes(32));
   });
 
   it("does not re-invalidate when rerendered with the same ws instance", () => {
@@ -212,6 +212,7 @@ describe("useRealtimeSync — ws instance change", () => {
     expect(calls).toContainEqual(["issues", "usage"]);
     expect(calls).toContainEqual(["issues", "attachments"]);
     expect(calls).toContainEqual(["issues", "tasks"]);
+    expect(calls).toContainEqual(["issues", "debug-session"]);
   });
 
   it("invalidates per-chat-session caches (no wsId in key) on ws instance change", () => {
@@ -267,6 +268,36 @@ describe("useRealtimeSync — ws instance change", () => {
 
     expect(invalidateSpy).toHaveBeenCalledWith({
       queryKey: issueKeys.attachments("issue-1"),
+    });
+  });
+
+  it("patches the debug-session cache without a refetch on debug_session:updated", () => {
+    const ws = createMockWs();
+    const setQueryData = vi.spyOn(qc, "setQueryData");
+    renderHook(() => useRealtimeSync(ws, stores), {
+      wrapper: createWrapper(qc),
+    });
+    const debugUpdated = vi
+      .mocked(ws.on)
+      .mock.calls.find(([event]) => event === "debug_session:updated")?.[1];
+    expect(debugUpdated).toBeDefined();
+
+    qc.setQueryData(issueKeys.debugSession("issue-1"), {
+      session: { id: "sess-1", status: "waiting_repro", event_count: 2 },
+    });
+    invalidateSpy.mockClear();
+    setQueryData.mockClear();
+
+    (debugUpdated as (payload: unknown) => void)({
+      issue_id: "issue-1",
+      session: { id: "sess-1", status: "waiting_repro", event_count: 12 },
+    });
+
+    expect(qc.getQueryData(issueKeys.debugSession("issue-1"))).toEqual({
+      session: { id: "sess-1", status: "waiting_repro", event_count: 12 },
+    });
+    expect(invalidateSpy).not.toHaveBeenCalledWith({
+      queryKey: issueKeys.debugSession("issue-1"),
     });
   });
   it("refetches the status catalog after an admin changes it elsewhere", async () => {
@@ -398,6 +429,28 @@ describe("useRealtimeSync — Table server membership invalidation", () => {
     });
     expect(invalidate).toHaveBeenCalledWith({
       queryKey: workspaceWorkingAgentsKeys.all("ws-1"),
+    });
+  });
+
+  it("does not refetch issue task lists on high-frequency task:progress ticks", () => {
+    vi.useFakeTimers();
+    const ws = createMockWs();
+    const invalidate = vi.spyOn(qc, "invalidateQueries");
+    renderHook(() => useRealtimeSync(ws, stores), {
+      wrapper: createWrapper(qc),
+    });
+    const onAny = vi.mocked(ws.onAny).mock.calls[0]?.[0];
+    expect(onAny).toBeDefined();
+
+    invalidate.mockClear();
+    onAny!({ type: "task:progress", payload: { task_id: "task-1", step: "tool" } } as never);
+    vi.advanceTimersByTime(100);
+
+    expect(invalidate).not.toHaveBeenCalledWith({
+      queryKey: ["issues", "tasks"],
+    });
+    expect(invalidate).not.toHaveBeenCalledWith({
+      queryKey: issueKeys.tableAll("ws-1"),
     });
   });
 

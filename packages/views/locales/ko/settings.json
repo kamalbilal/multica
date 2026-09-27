@@ -318,6 +318,9 @@
   },
   "issue": {
     "description": "각 생성 방식의 툴바에 항상 표시할 필드를 선택합니다. 숨긴 필드는 ⋯ 메뉴에서 계속 사용할 수 있으며, 값이 있는 동안에는 자동으로 표시됩니다.",
+    "debug_title": "디버그",
+    "debug_kickoff_label": "디버그 세션 만들기",
+    "debug_kickoff_hint": "에이전트 멘션은 자동으로 붙습니다.",
     "quick_create_title": "에이전트로 생성할 때의 도구 모음 필드",
     "manual_create_title": "수동 생성 도구 모음 필드",
     "fields": {

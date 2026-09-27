@@ -91,6 +91,7 @@ import type {
   CommentDeletedPayload,
   CommentResolvedPayload,
   CommentUnresolvedPayload,
+  DebugSessionUpdatedPayload,
   ActivityCreatedPayload,
   ReactionAddedPayload,
   ReactionRemovedPayload,
@@ -682,6 +683,7 @@ function invalidateWorkspaceScopedQueries(qc: QueryClient): void {
   qc.invalidateQueries({ queryKey: issueKeys.usageAll() });
   qc.invalidateQueries({ queryKey: issueKeys.attachmentsAll() });
   qc.invalidateQueries({ queryKey: issueKeys.tasksAll() });
+  qc.invalidateQueries({ queryKey: issueKeys.debugSessionAll() });
   // Per-chat-session caches are also keyed without wsId, so the
   // chatKeys.all(wsId) prefix above only reaches session lists / aggregates.
   // Message streams rely on WS invalidation with staleTime: Infinity; recover
@@ -983,6 +985,7 @@ export function useRealtimeSync(
       "issue:updated", "issue:created", "issue:deleted", "issue_attachments:changed", "issue_labels:changed", "issue_metadata:changed", "issue_properties:changed", "property:created", "property:updated", "inbox:new",
       "comment:created", "comment:updated", "comment:deleted",
       "comment:resolved", "comment:unresolved",
+      "debug_session:updated",
       "activity:created",
       "reaction:added", "reaction:removed",
       "issue_reaction:added", "issue_reaction:removed",
@@ -996,6 +999,11 @@ export function useRealtimeSync(
       // every message would flood the network. Specific chat handlers below
       // still receive it via ws.on() (a separate subscription channel).
       "task:message",
+      // task:progress is the same high-frequency class: step updates while
+      // an agent runs. Sending it through the task: prefix would refetch
+      // every issue's task list (~100ms debounce) and re-render the open
+      // issue timeline on each tick.
+      "task:progress",
       // task:completed / task:failed deliberately NOT here. They go through
       // both the task-prefix invalidate (refreshes the agent-task-snapshot
       // cache) AND the chat-specific ws.on() handlers below. The two
@@ -1196,6 +1204,22 @@ export function useRealtimeSync(
     const unsubCommentUnresolved = ws.on("comment:unresolved", (p) => {
       const { comment } = p as CommentUnresolvedPayload;
       if (comment?.issue_id) invalidateTimeline(comment.issue_id);
+    });
+
+    const unsubDebugSessionUpdated = ws.on("debug_session:updated", (p) => {
+      const { issue_id, session } = p as DebugSessionUpdatedPayload;
+      if (!issue_id) return;
+      if (session) {
+        qc.setQueryData(issueKeys.debugSession(issue_id), (current) => {
+          const prev = current as { session?: Record<string, unknown> | null } | undefined;
+          return {
+            session: {
+              ...(prev?.session ?? {}),
+              ...session,
+            },
+          };
+        });
+      }
     });
 
     const unsubActivityCreated = ws.on("activity:created", (p) => {
@@ -1761,6 +1785,7 @@ export function useRealtimeSync(
       unsubCommentDeleted();
       unsubCommentResolved();
       unsubCommentUnresolved();
+      unsubDebugSessionUpdated();
       unsubActivityCreated();
       unsubReactionAdded();
       unsubReactionRemoved();

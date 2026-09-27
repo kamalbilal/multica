@@ -1247,6 +1247,48 @@ describe("ApiClient schema fallback", () => {
       });
     });
   });
+
+  describe("getIssueDebugSession", () => {
+    it("falls back to a null session when the response is malformed", async () => {
+      stubFetchJson({ session: 12 });
+      const client = new ApiClient("https://api.example.test");
+      await expect(client.getIssueDebugSession("issue-1")).resolves.toEqual({ session: null });
+    });
+
+    it("keeps waiting-session fields when the envelope is valid", async () => {
+      stubFetchJson({
+        session: {
+          id: "sess-1",
+          issue_id: "issue-1",
+          agent_id: "agent-1",
+          status: "waiting_repro",
+          hypotheses: [{ id: "H1", text: "token is empty" }],
+          repro_steps: "Open the login page.",
+        },
+      });
+      const client = new ApiClient("https://api.example.test");
+      const out = await client.getIssueDebugSession("issue-1");
+      expect(out.session?.status).toBe("waiting_repro");
+      expect(out.session?.repro_steps).toBe("Open the login page.");
+      expect(out.session?.hypotheses).toEqual([{ id: "H1", text: "token is empty" }]);
+      expect(out.session?.event_count).toBe(0);
+    });
+
+    it("keeps event_count from a valid session", async () => {
+      stubFetchJson({
+        session: {
+          id: "sess-1",
+          issue_id: "issue-1",
+          agent_id: "agent-1",
+          status: "waiting_repro",
+          event_count: 7,
+        },
+      });
+      const client = new ApiClient("https://api.example.test");
+      const out = await client.getIssueDebugSession("issue-1");
+      expect(out.session?.event_count).toBe(7);
+    });
+  });
 });
 
 // Direct tests for the helper, decoupled from any specific endpoint —

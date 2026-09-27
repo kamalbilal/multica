@@ -2346,6 +2346,17 @@ func claimResponseAgentIdentityMatches(resp AgentTaskResponse) bool {
 func (h *Handler) buildClaimedTaskResponse(r *http.Request, task *db.AgentTaskQueue, runtime db.AgentRuntime, runtimeID, runtimeWorkspaceID string) (resp AgentTaskResponse, deliveredCommentIDs []pgtype.UUID, issueSnapshot []byte, agentSkillCount, builtinSkillCount int, failure *claimBuildFailure) {
 	// Build response with fresh agent data (name + skills + custom_env + custom_args).
 	resp = taskToResponse(*task, runtimeWorkspaceID)
+	if task.IssueID.Valid {
+		if ws, wsErr := util.ParseUUID(runtimeWorkspaceID); wsErr == nil {
+			if session, sessErr := h.Queries.GetOpenIssueDebugSession(r.Context(), db.GetOpenIssueDebugSessionParams{
+				IssueID:     task.IssueID,
+				AgentID:     task.AgentID,
+				WorkspaceID: ws,
+			}); sessErr == nil {
+				resp.DebugSession = debugSessionForClaim(session)
+			}
+		}
+	}
 	if err := (&service.IssueWakeupService{Tasks: h.TaskService}).CheckClaim(r.Context(), *task); err != nil {
 		if !errors.Is(err, service.ErrWakeupForbidden) {
 			return resp, nil, nil, 0, 0, h.rejectClaimSourceLoad(r.Context(), task, err, "wakeup", resp.WakeupID)

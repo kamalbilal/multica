@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import { act, fireEvent, screen, within } from "@testing-library/react";
 import type { TimelineEntry } from "@multica/core/types";
 import { renderWithI18n } from "../../test/i18n";
-import { MAX_RAIL_TICKS, ThreadMinimap, commentPreview, waveScale } from "./thread-minimap";
+import { MAX_RAIL_TICKS, MINIMAP_CONTENT_RESIZE_DEBOUNCE_MS, ThreadMinimap, commentPreview, waveScale } from "./thread-minimap";
 
 vi.mock("@multica/core/workspace/hooks", () => ({
   useActorName: () => ({
@@ -482,5 +482,84 @@ describe("ThreadMinimap", () => {
     expect(onJump).toHaveBeenCalledWith("r7");
     fireEvent.keyDown(row, { key: "Escape" });
     expect(within(nav).getByRole("button", { name: "First thread opener" })).toHaveFocus();
+  });
+
+  it("debounces content-size ResizeObserver layout reads while Virtuoso height ticks", () => {
+    vi.useFakeTimers({
+      toFake: ["setTimeout", "clearTimeout", "requestAnimationFrame", "cancelAnimationFrame"],
+    });
+    const OriginalResizeObserver = globalThis.ResizeObserver;
+    const resizeCallbacks: Array<() => void> = [];
+    vi.stubGlobal(
+      "ResizeObserver",
+      class {
+        constructor(callback: () => void) {
+          resizeCallbacks.push(callback);
+        }
+        observe() {}
+        unobserve() {}
+        disconnect() {}
+      },
+    );
+
+    const scroll = document.createElement("div");
+    scroll.appendChild(document.createElement("div"));
+    const commentEl = document.createElement("div");
+    commentEl.id = "comment-c1";
+    document.body.append(scroll, commentEl);
+
+    const rectSpy = vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(function (
+      this: HTMLElement,
+    ) {
+      if (this.id === "comment-c1") {
+        return {
+          top: 10,
+          bottom: 50,
+          left: 0,
+          right: 100,
+          width: 100,
+          height: 40,
+          x: 0,
+          y: 10,
+          toJSON() {},
+        } as DOMRect;
+      }
+      return {
+        top: 0,
+        bottom: 400,
+        left: 0,
+        right: 400,
+        width: 400,
+        height: 400,
+        x: 0,
+        y: 0,
+        toJSON() {},
+      } as DOMRect;
+    });
+
+    try {
+      renderWithI18n(
+        <ThreadMinimap threads={threads} scrollContainerEl={scroll} onJump={vi.fn()} />,
+      );
+      const afterMount = rectSpy.mock.calls.length;
+      expect(afterMount).toBeGreaterThan(0);
+
+      for (let i = 0; i < 8; i++) {
+        for (const callback of resizeCallbacks) callback();
+      }
+      expect(rectSpy.mock.calls.length).toBe(afterMount);
+
+      act(() => {
+        vi.advanceTimersByTime(MINIMAP_CONTENT_RESIZE_DEBOUNCE_MS);
+        vi.advanceTimersByTime(30);
+      });
+      expect(rectSpy.mock.calls.length).toBeGreaterThan(afterMount);
+    } finally {
+      rectSpy.mockRestore();
+      globalThis.ResizeObserver = OriginalResizeObserver;
+      vi.useRealTimers();
+      scroll.remove();
+      commentEl.remove();
+    }
   });
 });

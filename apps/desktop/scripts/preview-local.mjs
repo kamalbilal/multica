@@ -9,6 +9,11 @@ import { fileURLToPath } from "node:url";
 
 import { envWithLocalBins } from "./package.mjs";
 import {
+  desktopBundledCliPath,
+  serverBuiltCliPath,
+  stopDesktopProfileDaemons,
+} from "./bundled-cli-install.mjs";
+import {
   applyWorktreeDevEnv,
   loadDesktopViteEnv,
   repoRootFromScriptDir,
@@ -50,6 +55,12 @@ function run(command, args, { shell = false, env = process.env } = {}) {
 const node = process.execPath;
 const env = envWithLocalBins(process.env);
 const isWin = process.platform === "win32";
+
+const repoRoot = repoRootFromScriptDir(here);
+
+console.log("[preview:local] stopping Desktop profile daemons (if any)…");
+stopDesktopProfileDaemons(serverBuiltCliPath(repoRoot));
+stopDesktopProfileDaemons(desktopBundledCliPath(repoRoot));
 
 console.log("[preview:local] bundling multica CLI…");
 run(node, [join(here, "bundle-cli.mjs")], { env });

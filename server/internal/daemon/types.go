@@ -147,6 +147,7 @@ type Task struct {
 	QuickCreateAttachmentIDs      []string               `json:"quick_create_attachment_ids,omitempty"`      // attachments uploaded in the quick-create prompt and bound by issue create
 	QuickCreateSourceContext      json.RawMessage        `json:"quick_create_source_context,omitempty"`      // immutable historical context, separate from the new instruction
 	WakeupID                      string                 `json:"wakeup_id,omitempty"`
+	DebugSession                  *DebugSessionData      `json:"debug_session,omitempty"`
 	HandoffNote                   string                 `json:"handoff_note,omitempty"` // legacy assignment handoff instruction; rendered only in the per-turn prompt
 
 	SquadID               string `json:"squad_id,omitempty"`                // when the picker was a squad, the squad's UUID; Agent is still the resolved leader
@@ -311,6 +312,21 @@ type TaskResult struct {
 	// precisely when the abandoned id would otherwise stay selectable.
 	RetiredSessionID string           `json:"-"`
 	Usage            []TaskUsageEntry `json:"usage,omitempty"` // per-model token usage
+}
+
+// DebugSessionData is the open issue debug session claimed with this run.
+type DebugSessionData struct {
+	ID             string          `json:"id"`
+	Status         string          `json:"status"`
+	ContinueAction string          `json:"continue_action,omitempty"`
+	Hypotheses     json.RawMessage `json:"hypotheses,omitempty"`
+	ReproSteps     string          `json:"repro_steps,omitempty"`
+	LogDump        string          `json:"log_dump,omitempty"`
+	IngestToken    string          `json:"ingest_token,omitempty"`
+	// IngestURL is filled by the daemon after the loopback ingest binds a port.
+	// Not a server field — agents must hardcode it in probes.
+	IngestURL     string `json:"-"`
+	WaitCommentID string `json:"wait_comment_id,omitempty"`
 }
 
 // PluginHookTool is one agent-trigger plugin hook, as the agent will see it.

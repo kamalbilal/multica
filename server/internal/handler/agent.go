@@ -362,6 +362,18 @@ type TaskCancellationActor struct {
 	Name string `json:"name,omitempty"`
 }
 
+// TaskDebugSessionData is the open issue debug session claimed with this run.
+type TaskDebugSessionData struct {
+	ID             string          `json:"id"`
+	Status         string          `json:"status"`
+	ContinueAction string          `json:"continue_action,omitempty"`
+	Hypotheses     json.RawMessage `json:"hypotheses,omitempty"`
+	ReproSteps     string          `json:"repro_steps,omitempty"`
+	LogDump        string          `json:"log_dump,omitempty"`
+	IngestToken    string          `json:"ingest_token,omitempty"`
+	WaitCommentID  string          `json:"wait_comment_id,omitempty"`
+}
+
 type AgentTaskResponse struct {
 	StartClaimSupported      bool                   `json:"start_claim_supported,omitempty"`
 	CancelledByCommentChange bool                   `json:"cancelled_by_comment_change,omitempty"`
@@ -517,6 +529,7 @@ type AgentTaskResponse struct {
 	QuickCreateAttachmentIDs []string             `json:"quick_create_attachment_ids,omitempty"` // attachment ids uploaded in the quick-create prompt and bound on issue create
 	QuickCreateSourceContext json.RawMessage      `json:"quick_create_source_context,omitempty"` // immutable historical context for source-context quick-create
 	WakeupID                 string               `json:"wakeup_id,omitempty"`
+	DebugSession             *TaskDebugSessionData `json:"debug_session,omitempty"`
 	HandoffNote              string               `json:"handoff_note,omitempty"`            // legacy assignment handoff instruction retained for installed clients; rendered by the daemon only in the per-turn prompt
 	SquadID                  string               `json:"squad_id,omitempty"`                // for quick-create tasks where the picker was a squad; Agent is still the resolved leader
 	SquadName                string               `json:"squad_name,omitempty"`              // display name for the picker squad

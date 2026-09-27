@@ -6,6 +6,8 @@ import { ContentEditor, type ContentEditorRef, useFileDropZone, FileDropOverlay,
 import { FileUploadButton } from "@multica/ui/components/common/file-upload-button";
 import { SubmitButton } from "@multica/ui/components/common/submit-button";
 import { Button } from "@multica/ui/components/ui/button";
+import { Bug } from "lucide-react";
+import { toast } from "sonner";
 import { contentReferencesAttachment, type AgentTask } from "@multica/core/types";
 import { formatShortcut, useShortcut } from "@multica/core/shortcuts";
 import { useCommentDraftStore } from "@multica/core/issues/stores";
@@ -26,7 +28,7 @@ interface CommentInputProps {
   /** Resolves true on success, false on failure. The composer keeps the text
    *  (editor locked + button spinning) until this settles, then clears only on
    *  success — a failed send must not silently discard the user's draft. */
-  onSubmit: (content: string, attachmentIds?: string[], suppressAgentIds?: string[], steerTaskIds?: string[]) => Promise<string | boolean>;
+  onSubmit: (content: string, attachmentIds?: string[], suppressAgentIds?: string[], steerTaskIds?: string[], debugMode?: boolean) => Promise<string | boolean>;
   /** Called after the server accepts the comment and the composer is cleared. */
   onAccepted?: (commentId: string) => void;
   onEditAnnotation?: (id: string) => boolean;
@@ -58,6 +60,9 @@ function CommentInput({ issueId, onSubmit, onAccepted, onEditAnnotation }: Comme
   const persistedDraft = useCommentDraftStore((store) => store.getDraft(draftKey));
   const [content, setContent] = useState(initialDraft ?? "");
   const [isEmpty, setIsEmpty] = useState(() => !initialDraft?.trim());
+  const [debugMode, setDebugMode] = useState(false);
+  const debugModeRef = useRef(debugMode);
+  debugModeRef.current = debugMode;
   const annotations = useCommentDraftStore((s) => s.getAnnotations(draftKey));
   const composedContent = useMemo(() => composeAnnotatedReply(content, annotations), [content, annotations]);
   const canSend = annotations.length ? hasReplyIntent(content, annotations) : !isEmpty;
@@ -174,6 +179,10 @@ function CommentInput({ issueId, onSubmit, onAccepted, onEditAnnotation }: Comme
       // recipient this comment no longer addresses: never stop a run on it.
       const restartTaskIds = triggerPreview.isCurrent ? routing.restartTaskIds : [];
       if (!(await stopRunsBeforeSend(restartTaskIds))) return false;
+      if (debugModeRef.current && triggerPreview.isCurrent && triggerPreview.agents.length === 0) {
+        toast.error(t(($) => $.comment.debug.requires_agent));
+        return false;
+      }
       // Flush the editor's pending debounce before snapshotting — a late flush
       // of pre-submit typing must not read as an edit made during the request.
       const pending = editorRef.current?.flushPendingUpdate?.();
@@ -186,11 +195,13 @@ function CommentInput({ issueId, onSubmit, onAccepted, onEditAnnotation }: Comme
       const activeIds = pendingAttachments
         .filter((a) => contentReferencesAttachment(content, a))
         .map((a) => a.id);
+      const debug = debugModeRef.current;
       return onSubmit(
         content,
         activeIds.length > 0 ? activeIds : undefined,
         suppressAgentIds.length > 0 ? suppressAgentIds : undefined,
-        steerTaskIds.length > 0 ? steerTaskIds : undefined,
+        debug ? undefined : (steerTaskIds.length > 0 ? steerTaskIds : undefined),
+        debug || undefined,
       ).then((commentId) => {
         acceptedCommentIdRef.current = typeof commentId === "string" ? commentId : null;
         return !!commentId;
@@ -213,6 +224,7 @@ function CommentInput({ issueId, onSubmit, onAccepted, onEditAnnotation }: Comme
       setContent("");
       setIsEmpty(true);
       resetRecipients();
+      setDebugMode(false);
       editorScrubbedRef.current = true;
       if (acceptedCommentIdRef.current) onAccepted?.(acceptedCommentIdRef.current);
     },
@@ -299,7 +311,7 @@ function CommentInput({ issueId, onSubmit, onAccepted, onEditAnnotation }: Comme
           </div>
         </div>
       )}
-      <div className="absolute bottom-1 left-2 right-28 min-w-0">
+      <div className="absolute bottom-1 left-2 right-44 min-w-0">
         <CommentTriggerChips
           recipients={recipients}
           blocked={triggerPreview.blocked}
@@ -309,6 +321,19 @@ function CommentInput({ issueId, onSubmit, onAccepted, onEditAnnotation }: Comme
         />
       </div>
       <div className="absolute bottom-1 right-1.5 flex items-center gap-1">
+        <Button
+          type="button"
+          size="sm"
+          variant={debugMode ? "secondary" : "ghost"}
+          className="rounded-full"
+          aria-pressed={debugMode}
+          aria-label={t(($) => $.comment.debug.toggle_aria)}
+          title={t(($) => $.comment.debug.toggle_aria)}
+          onClick={() => setDebugMode((on) => !on)}
+        >
+          <Bug className="size-3.5" aria-hidden />
+          {t(($) => $.comment.debug.toggle)}
+        </Button>
         <FileUploadButton
           size="sm"
           multiple

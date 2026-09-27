@@ -26,6 +26,14 @@ const MIN_THREADS = 2;
  */
 export const MAX_RAIL_TICKS = 80;
 
+/**
+ * Trailing delay before a content-size ResizeObserver recomputes visible
+ * ticks. Virtuoso changes the inner column height as rows mount; measuring
+ * every comment on those ticks layout-thrashes during scroll. Scroll itself
+ * still recomputes on animation frame.
+ */
+export const MINIMAP_CONTENT_RESIZE_DEBOUNCE_MS = 200;
+
 /** Intent delay before the card first appears; gliding afterwards is instant. */
 const PREVIEW_OPEN_DELAY_MS = 150;
 /** Grace period on leave — long enough to travel from rail onto the card. */
@@ -185,6 +193,7 @@ function useVisibleCommentIds(
     if (!container) return;
 
     let raf = 0;
+    let resizeTimer = 0;
     const compute = () => {
       raf = 0;
       const rect = container.getBoundingClientRect();
@@ -200,18 +209,23 @@ function useVisibleCommentIds(
     const schedule = () => {
       if (!raf) raf = requestAnimationFrame(compute);
     };
+    // Viewport resizes and Virtuoso spacer growth: trailing debounce so a
+    // height tick on every mounted row does not force layout mid-scroll.
+    const scheduleFromResize = () => {
+      window.clearTimeout(resizeTimer);
+      resizeTimer = window.setTimeout(schedule, MINIMAP_CONTENT_RESIZE_DEBOUNCE_MS);
+    };
 
     compute();
     container.addEventListener("scroll", schedule, { passive: true });
-    // Content height changes without scroll events: Virtuoso mounting rows
-    // after first paint, streamed agent replies growing, window resizes.
-    const ro = new ResizeObserver(schedule);
+    const ro = new ResizeObserver(scheduleFromResize);
     ro.observe(container);
     if (container.firstElementChild) ro.observe(container.firstElementChild);
     return () => {
       container.removeEventListener("scroll", schedule);
       ro.disconnect();
       if (raf) cancelAnimationFrame(raf);
+      window.clearTimeout(resizeTimer);
     };
   }, [commentIds, scrollContainerEl]);
 

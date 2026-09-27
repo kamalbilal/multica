@@ -7,6 +7,8 @@ import { ContentEditor, type ContentEditorRef, useFileDropZone, FileDropOverlay,
 import { FileUploadButton } from "@multica/ui/components/common/file-upload-button";
 import { SubmitButton } from "@multica/ui/components/common/submit-button";
 import { Button } from "@multica/ui/components/ui/button";
+import { Bug } from "lucide-react";
+import { toast } from "sonner";
 import { ActorAvatar } from "../../common/actor-avatar";
 import { contentReferencesAttachment, type AgentTask } from "@multica/core/types";
 import { formatShortcut, useShortcut } from "@multica/core/shortcuts";
@@ -34,7 +36,7 @@ interface ReplyInputProps {
   avatarId: string;
   /** Resolves true on success, false on failure — the reply box keeps its text
    *  (locked + spinning) until then, clearing only on success. */
-  onSubmit: (content: string, attachmentIds?: string[], suppressAgentIds?: string[], steerTaskIds?: string[]) => Promise<string | boolean>;
+  onSubmit: (content: string, attachmentIds?: string[], suppressAgentIds?: string[], steerTaskIds?: string[], debugMode?: boolean) => Promise<string | boolean>;
   /** Called after the server accepts the reply and the composer is cleared. */
   onAccepted?: (commentId: string) => void;
   size?: "sm" | "default";
@@ -89,6 +91,9 @@ function ReplyInput({
   const [content, setContent] = useState(initialDraft ?? "");
   const setDraft = useCommentDraftStore((s) => s.setDraft);
   const [isEmpty, setIsEmpty] = useState(!initialDraft?.trim());
+  const [debugMode, setDebugMode] = useState(false);
+  const debugModeRef = useRef(debugMode);
+  debugModeRef.current = debugMode;
   const annotations = useCommentDraftStore((s) => draftKey ? s.getAnnotations(draftKey) : EMPTY_REPLY_ANNOTATIONS);
   const composedContent = useMemo(() => composeAnnotatedReply(content, annotations), [content, annotations]);
   const canSend = !targetMissing && (annotations.length ? hasReplyIntent(content, annotations) : !isEmpty);
@@ -183,6 +188,10 @@ function ReplyInput({
       // recipient this comment no longer addresses: never stop a run on it.
       const restartTaskIds = triggerPreview.isCurrent ? routing.restartTaskIds : [];
       if (!(await stopRunsBeforeSend(restartTaskIds))) return false;
+      if (debugModeRef.current && triggerPreview.isCurrent && triggerPreview.agents.length === 0) {
+        toast.error(t(($) => $.comment.debug.requires_agent));
+        return false;
+      }
       if (draftKey) {
         // Flush pending debounce before snapshotting — see CommentInput.
         const pending = editorRef.current?.flushPendingUpdate?.();
@@ -195,11 +204,13 @@ function ReplyInput({
       const activeIds = pendingAttachments
         .filter((a) => contentReferencesAttachment(content, a))
         .map((a) => a.id);
+      const debug = debugModeRef.current;
       return onSubmit(
         content,
         activeIds.length > 0 ? activeIds : undefined,
         suppressAgentIds.length > 0 ? suppressAgentIds : undefined,
-        steerTaskIds.length > 0 ? steerTaskIds : undefined,
+        debug ? undefined : (steerTaskIds.length > 0 ? steerTaskIds : undefined),
+        debug || undefined,
       ).then((commentId) => {
         acceptedCommentIdRef.current = typeof commentId === "string" ? commentId : null;
         return !!commentId;
@@ -223,6 +234,7 @@ function ReplyInput({
       setContent("");
       setIsEmpty(true);
       resetRecipients();
+      setDebugMode(false);
       editorScrubbedRef.current = true;
       if (acceptedCommentIdRef.current) onAccepted?.(acceptedCommentIdRef.current);
     },
@@ -308,7 +320,7 @@ function ReplyInput({
             <p className="text-muted-foreground">{placeholderText}</p>
           </div>
         )}
-        <div className="absolute bottom-0 left-0 right-24 min-w-0">
+        <div className="absolute bottom-0 left-0 right-44 min-w-0">
           <CommentTriggerChips
             recipients={recipients}
             blocked={triggerPreview.blocked}
@@ -318,6 +330,19 @@ function ReplyInput({
           />
         </div>
         <div className="absolute bottom-0 right-0 flex items-center gap-1">
+          <Button
+            type="button"
+            size="sm"
+            variant={debugMode ? "secondary" : "ghost"}
+            className="rounded-full"
+            aria-pressed={debugMode}
+            aria-label={t(($) => $.comment.debug.toggle_aria)}
+            title={t(($) => $.comment.debug.toggle_aria)}
+            onClick={() => setDebugMode((on) => !on)}
+          >
+            <Bug className="size-3.5" aria-hidden />
+            {t(($) => $.comment.debug.toggle)}
+          </Button>
           <FileUploadButton
             size="sm"
             multiple

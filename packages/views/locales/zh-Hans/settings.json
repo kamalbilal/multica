@@ -318,6 +318,9 @@
   },
   "issue": {
     "description": "选择各创建方式的工具栏中常驻显示的字段。隐藏的字段仍可从 ⋯ 菜单使用，有值时会自动显示。",
+    "debug_title": "调试",
+    "debug_kickoff_label": "生成调试会话",
+    "debug_kickoff_hint": "会自动加上智能体提及。",
     "quick_create_title": "智能体创建工具栏字段",
     "manual_create_title": "手动创建工具栏字段",
     "fields": {

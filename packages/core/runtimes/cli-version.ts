@@ -126,6 +126,29 @@ function meetsMinCliVersion(detected: string | undefined | null, minimum: string
  */
 export const LOCAL_WORKTREE_CAPABILITY = "local-worktree-v1";
 
+/** Frontend mirror of `DaemonCapabilityDebugIngestV1`. */
+export const DEBUG_INGEST_CAPABILITY = "debug-ingest-v1";
+
+/**
+ * Whether this agent's bound runtime has recorded capabilities and advertised
+ * debug ingest. `null` means we cannot tell (no runtime row, or capabilities
+ * never recorded) — do not disable the Generate action in that case (#7113).
+ * `false` is the positive "this daemon is too old" signal.
+ */
+export function agentRuntimeAdvertisesDebugIngest(
+  agent: { runtime_id?: string | null },
+  runtimes: { id: string; metadata?: unknown }[],
+): boolean | null {
+  if (!agent.runtime_id) return null;
+  const runtime = runtimes.find((row) => row.id === agent.runtime_id);
+  if (!runtime) return null;
+  const metadata = runtime.metadata;
+  if (!metadata || typeof metadata !== "object") return null;
+  const caps = (metadata as { capabilities?: unknown }).capabilities;
+  if (!Array.isArray(caps)) return null;
+  return caps.includes(DEBUG_INGEST_CAPABILITY);
+}
+
 /** Minimal runtime shape this module needs; keeps callers from importing types. */
 type RuntimeCapabilityRow = {
   daemon_id?: string | null;

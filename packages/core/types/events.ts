@@ -19,6 +19,7 @@ export type WSEventType =
   | "comment:deleted"
   | "comment:resolved"
   | "comment:unresolved"
+  | "debug_session:updated"
   | "agent:status"
   | "agent:created"
   | "agent:archived"
@@ -244,6 +245,15 @@ export interface CommentResolvedPayload {
 
 export interface CommentUnresolvedPayload {
   comment: Comment;
+}
+
+export interface DebugSessionUpdatedPayload {
+  issue_id: string;
+  session: {
+    id: string;
+    status: string;
+    event_count?: number;
+  } | null;
 }
 
 export interface WorkspaceUpdatedPayload {
@@ -585,6 +595,7 @@ export interface WSEventPayloadMap {
   "comment:deleted": CommentDeletedPayload;
   "comment:resolved": CommentResolvedPayload;
   "comment:unresolved": CommentUnresolvedPayload;
+  "debug_session:updated": DebugSessionUpdatedPayload;
   "reaction:added": ReactionAddedPayload;
   "reaction:removed": ReactionRemovedPayload;
   "agent:status": AgentStatusPayload;

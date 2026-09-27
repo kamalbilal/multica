@@ -22,4 +22,14 @@ All four methods share these rules:
 
 Every trigger creates a [run](/tasks). Progress streams back to where you triggered it — the issue's timeline or the chat window; the execution log shows the full run and lets you stop or retry it.
 
-When a run takes long to start, the runtime is usually offline — check the section on runs that do not start in [Troubleshooting](/troubleshooting).
+## Debug session
+
+Turn on **Debug** in the issue composer (or **Generate debug session** on an agent comment). The agent writes hypotheses, adds probes, and tells you how to retest. Change that kickoff text in **Settings → Preferences → Issue**. Retest on the same machine as the desktop daemon, then tap **Approved**, leave a note, or **Looks fixed**.
+
+The agent must not wait in-process. After posting retest steps it runs `multica debug wait` and the turn ends. Probe events POST `text/plain` JSON to the loopback ingest URL printed in that turn (hardcode it in the app you retest — the env var is not set in your browser). **Looks fixed** is the signal to strip every `multica-debug: start` / `end` marker.
+
+```bash
+multica debug wait --issue <id> --repro-steps "…" --wait-comment-id <comment>
+multica debug status --issue <id>
+multica debug close --issue <id>
+```

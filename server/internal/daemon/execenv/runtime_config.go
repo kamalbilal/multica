@@ -222,6 +222,29 @@ func runtimeConfigPath(workDir, provider string) string {
 	}
 }
 
+// BuildRuntimeConfigFollowDirective tells cursor-family agents where the
+// on-disk runtime brief lives. The SDK path does not receive an inline system
+// prompt, so the turn must name the file explicitly.
+func BuildRuntimeConfigFollowDirective(workDir, provider string) string {
+	if !IsCursorFamilyProvider(provider) || strings.TrimSpace(workDir) == "" {
+		return ""
+	}
+	path := runtimeConfigPath(workDir, provider)
+	if path == "" {
+		return ""
+	}
+	abs, err := filepath.Abs(path)
+	if err != nil {
+		abs = path
+	}
+	return fmt.Sprintf(`## Multica runtime config (mandatory)
+
+Read and follow the platform instructions in this file before acting:
+%s
+
+That file is authoritative for Multica workflow, CLI usage, and delivery. This message does not replace it.`, abs)
+}
+
 // writeRuntimeConfigFile writes the Multica runtime brief to path without
 // clobbering any user-authored content already present. Behaviour by file
 // state:

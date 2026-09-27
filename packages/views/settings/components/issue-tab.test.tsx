@@ -6,6 +6,7 @@ import {
   DEFAULT_QUICK_CREATE_FIELDS,
   useIssueCreateSettingsStore,
 } from "@multica/core/issues/stores/issue-create-settings-store";
+import { useDebugSessionSettingsStore } from "@multica/core/issues/stores/debug-session-settings-store";
 import { renderWithI18n } from "../../test/i18n";
 import { IssueTab } from "./issue-tab";
 
@@ -14,6 +15,7 @@ function resetStore() {
     quickCreateFields: DEFAULT_QUICK_CREATE_FIELDS,
     manualCreateFields: DEFAULT_MANUAL_CREATE_FIELDS,
   });
+  useDebugSessionSettingsStore.setState({ kickoffMessage: "" });
 }
 
 describe("IssueTab", () => {
@@ -72,5 +74,22 @@ describe("IssueTab", () => {
       "project",
     ]);
     expect(useIssueCreateSettingsStore.getState().quickCreateFields).toEqual(["project"]);
+  });
+
+  it("persists a custom generate-debug kickoff message", async () => {
+    const user = userEvent.setup();
+    renderWithI18n(<IssueTab />);
+
+    const textarea = screen.getByRole("textbox", { name: "Generate debug session" });
+    expect(textarea).toHaveValue(
+      "Start a debug session. Write 3–5 hypotheses, add probes, then tell me how to retest. Always push your work to the branch so I can retest from my main local checkout, not your worktree.",
+    );
+
+    await user.clear(textarea);
+    await user.type(textarea, "Look at the login 500.");
+
+    expect(useDebugSessionSettingsStore.getState().kickoffMessage).toBe(
+      "Look at the login 500.",
+    );
   });
 });

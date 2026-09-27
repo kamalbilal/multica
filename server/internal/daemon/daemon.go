@@ -28,6 +28,7 @@ import (
 	"golang.org/x/sync/singleflight"
 
 	"github.com/multica-ai/multica/server/internal/cli"
+	"github.com/multica-ai/multica/server/internal/daemon/debugingest"
 	"github.com/multica-ai/multica/server/internal/daemon/execenv"
 	"github.com/multica-ai/multica/server/internal/daemon/repocache"
 	"github.com/multica-ai/multica/server/internal/selfexec"
@@ -189,6 +190,55 @@ func taskMulticaEnvironment(task Task, agentName, token, configRoot, workspacesR
 		"TMPDIR":               tempDir,
 		"TMP":                  tempDir,
 		"TEMP":                 tempDir,
+	}
+}
+
+func applyDebugSessionEnv(env map[string]string, task Task, ingest *debugingest.Server, workspacesRoot string) {
+	if task.DebugSession == nil {
+		return
+	}
+	env["MULTICA_ISSUE_ID"] = task.IssueID
+	env["MULTICA_DEBUG_SESSION_ID"] = task.DebugSession.ID
+	env["MULTICA_DEBUG_LOG_PATH"] = debugingest.EventsPath(workspacesRoot, task.DebugSession.ID)
+	if ingest != nil && task.DebugSession.IngestToken != "" {
+		env["MULTICA_DEBUG_INGEST_URL"] = ingest.IngestURL(task.DebugSession.IngestToken)
+		env["MULTICA_DEBUG_INGEST_TOKEN"] = task.DebugSession.IngestToken
+	}
+}
+
+func (d *Daemon) debugIngest() *debugingest.Server {
+	d.debugIngestOnce.Do(func() {
+		srv := debugingest.New(d.cfg.WorkspacesRoot)
+		srv.OnEvent = func(issueID, sessionID string, eventCount int) {
+			if d.client == nil || issueID == "" || sessionID == "" {
+				return
+			}
+			if err := d.client.PutDebugSessionEventCount(context.Background(), issueID, sessionID, eventCount); err != nil {
+				d.logger.Warn("debug session: event count failed", "error", err, "session_id", sessionID)
+			}
+		}
+		if err := srv.Start(); err != nil {
+			d.logger.Warn("debug ingest server failed to start", "error", err)
+			return
+		}
+		d.debugIngestSrv = srv
+	})
+	return d.debugIngestSrv
+}
+
+func (d *Daemon) hydrateDebugSessionLogs(task *Task) {
+	if task == nil || task.DebugSession == nil {
+		return
+	}
+	dump, err := debugingest.ReadEvents(d.cfg.WorkspacesRoot, task.DebugSession.ID, 256<<10)
+	if err != nil || dump == "" {
+		return
+	}
+	task.DebugSession.LogDump = dump
+	if dump != "" && d.client != nil {
+		if err := d.client.PutDebugSessionLogs(context.Background(), task.IssueID, task.DebugSession.ID, dump); err != nil {
+			d.logger.Warn("debug session: persist log dump failed", "error", err, "session_id", task.DebugSession.ID)
+		}
 	}
 }
 
@@ -456,6 +506,9 @@ type Daemon struct {
 	// daemon tracks a handful of workspaces, and a mutex for a workspace that
 	// went away is a few bytes, not a leak worth a lifecycle.
 	registerSerial sync.Map
+
+	debugIngestOnce sync.Once
+	debugIngestSrv  *debugingest.Server
 
 	// agentsAvailable holds the current built-in agent CLI availability set —
 	// the same shape as cfg.Agents, which it supersedes as the read path.
@@ -6490,6 +6543,9 @@ func gcMetaForTask(task Task) (execenv.GCMeta, bool) {
 	default:
 		return execenv.GCMeta{}, false
 	}
+	if task.DebugSession != nil {
+		meta.DebugSessionID = task.DebugSession.ID
+	}
 	return meta, true
 }
 
@@ -8289,6 +8345,16 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 	// duplicating the same path under two lifecycle meanings.
 	if env.LocalWorktree != nil {
 		defer func() {
+			if task.DebugSession != nil && debugingest.HasHold(d.cfg.WorkspacesRoot, task.DebugSession.ID) && task.DebugSession.ContinueAction != "fixed" {
+				if taskResult.WorkDir == "" {
+					taskResult.WorkDir = env.WorkDir
+				}
+				if taskResult.EnvRoot == "" {
+					taskResult.EnvRoot = env.RootDir
+				}
+				taskLog.Info("debug session: holding worktree until the human continues")
+				return
+			}
 			if taskResult.WorkDir == "" {
 				taskResult.WorkDir = env.WorkDir
 			}
@@ -8489,6 +8555,16 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 	if env.LocalWorktree != nil && len(env.LocalWorktree.ReplayConflicts) > 0 {
 		promptOptions = append(promptOptions, WithWorktreeReplayConflicts(env.LocalWorktree.ReplayConflicts))
 	}
+	if env.WorkDir != "" {
+		promptOptions = append(promptOptions, WithAgentWorkDir(env.WorkDir))
+	}
+	d.hydrateDebugSessionLogs(&task)
+	if task.DebugSession != nil {
+		if ingest := d.debugIngest(); ingest != nil && task.DebugSession.IngestToken != "" {
+			ingest.Register(task.DebugSession.IngestToken, task.DebugSession.ID)
+			task.DebugSession.IngestURL = ingest.IngestURL(task.DebugSession.IngestToken)
+		}
+	}
 	prompt := BuildPrompt(task, provider, promptOptions...)
 
 	// Pass task-scoped auth credentials and context so the spawned agent CLI
@@ -8505,6 +8581,7 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 		return TaskResult{}, err
 	}
 	agentEnv := taskMulticaEnvironment(task, agentName, agentToken, env.MulticaConfigRoot, d.cfg.WorkspacesRoot, d.cfg.ServerBaseURL, d.cfg.HealthPort, slot, taskTempDir)
+	applyDebugSessionEnv(agentEnv, task, d.debugIngest(), d.cfg.WorkspacesRoot)
 	if checkoutMode := repoCheckoutModeFor(provider, runtime.GOOS); checkoutMode != "" {
 		agentEnv[repoCheckoutModeEnv] = checkoutMode
 	}

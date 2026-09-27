@@ -22,6 +22,7 @@ import type {
   ReactionAddedPayload,
   ReactionRemovedPayload,
 } from "@multica/core/types";
+import { api, ApiError } from "@multica/core/api";
 import {
   issueTimelineOptions,
   issueKeys,
@@ -41,6 +42,10 @@ import {
 } from "@multica/core/issues/comment-trigger-outcomes";
 import { useWSEvent, useWSReconnect } from "@multica/core/realtime";
 import { removeCommentSubtree } from "@multica/core/issues/comment-deletion";
+import {
+  buildDebugKickoffContent,
+  useDebugSessionSettingsStore,
+} from "@multica/core/issues/stores/debug-session-settings-store";
 import { toast } from "sonner";
 import { useT } from "../../i18n";
 import { blockedShortReasonLabel } from "../blocked-trigger-copy";
@@ -355,10 +360,10 @@ export function useIssueTimeline(issueId: string, userId?: string) {
   // on success — so a slow send no longer leaves the box full next to an
   // already-posted comment, and a failed send keeps the draft.
   const submitComment = useCallback(
-    async (content: string, attachmentIds?: string[], suppressAgentIds?: string[], steerTaskIds?: string[]): Promise<string | false> => {
+    async (content: string, attachmentIds?: string[], suppressAgentIds?: string[], steerTaskIds?: string[], debugMode?: boolean): Promise<string | false> => {
       if (!content.trim() || !userId) return false;
       try {
-        const comment = await createComment({ content, attachmentIds, suppressAgentIds, steerTaskIds });
+        const comment = await createComment({ content, attachmentIds, suppressAgentIds, steerTaskIds, debugMode });
         warnUnhandledTriggers(comment?.trigger_outcomes, comment?.content);
         return comment.id;
       } catch (err) {
@@ -374,7 +379,7 @@ export function useIssueTimeline(issueId: string, userId?: string) {
   );
 
   const submitReply = useCallback(
-    async (parentId: string, content: string, attachmentIds?: string[], suppressAgentIds?: string[], steerTaskIds?: string[]): Promise<string | false> => {
+    async (parentId: string, content: string, attachmentIds?: string[], suppressAgentIds?: string[], steerTaskIds?: string[], debugMode?: boolean): Promise<string | false> => {
       if (!content.trim() || !userId) return false;
       try {
         const comment = await createComment({
@@ -384,6 +389,7 @@ export function useIssueTimeline(issueId: string, userId?: string) {
           attachmentIds,
           suppressAgentIds,
           steerTaskIds,
+          debugMode,
         });
         warnUnhandledTriggers(comment?.trigger_outcomes, comment?.content);
         return comment.id;
@@ -426,6 +432,50 @@ export function useIssueTimeline(issueId: string, userId?: string) {
       }
     },
     [deleteCommentAsync, t],
+  );
+
+  const generateDebugSession = useCallback(
+    async (entry: TimelineEntry) => {
+      if (!userId) return;
+      try {
+        const envelope = await api.getIssueDebugSession(issueId);
+        const status = envelope.session?.status;
+        if (status === "waiting_repro" || status === "waiting_verify") {
+          toast.info(t(($) => $.comment.debug.already_waiting));
+          return;
+        }
+        const content = buildDebugKickoffContent(
+          entry.actor_name || "agent",
+          entry.actor_id,
+          useDebugSessionSettingsStore.getState().kickoffMessage,
+          t(($) => $.comment.debug.kickoff_message),
+        );
+        await createComment({
+          content,
+          parentId: entry.id,
+          debugMode: true,
+        });
+      } catch (err) {
+        if (err instanceof ApiError && err.status === 409) {
+          toast.info(t(($) => $.comment.debug.already_waiting));
+          return;
+        }
+        if (err instanceof ApiError && err.status === 422) {
+          toast.error(t(($) => $.comment.debug.requires_daemon));
+          return;
+        }
+        if (err instanceof ApiError && err.status === 400) {
+          toast.error(t(($) => $.comment.debug.requires_agent));
+          return;
+        }
+        toast.error(
+          err instanceof Error && err.message
+            ? err.message
+            : t(($) => $.comment.debug.generate_failed),
+        );
+      }
+    },
+    [userId, createComment, issueId, t],
   );
 
   const toggleResolveComment = useCallback(
@@ -529,6 +579,7 @@ export function useIssueTimeline(issueId: string, userId?: string) {
     submitReply,
     editComment,
     deleteComment,
+    generateDebugSession,
     toggleResolveComment,
     toggleReaction,
   };

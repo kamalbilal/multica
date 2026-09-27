@@ -1,17 +1,23 @@
 "use client";
 
+import { useState } from "react";
 import { Switch } from "@multica/ui/components/ui/switch";
+import { Textarea } from "@multica/ui/components/ui/textarea";
 import {
   MANUAL_CREATE_FIELDS,
   QUICK_CREATE_FIELDS,
   useIssueCreateSettingsStore,
 } from "@multica/core/issues/stores/issue-create-settings-store";
+import {
+  persistDebugKickoffMessage,
+  useDebugSessionSettingsStore,
+} from "@multica/core/issues/stores/debug-session-settings-store";
 import { toast } from "sonner";
 import { useT } from "../../i18n";
 import { SettingsCard, SettingsRow, SettingsSection } from "./settings-layout";
 
 /**
- * Issue preferences. One group per create-issue
+ * Issue preferences. Debug kickoff text plus one group per create-issue
  * mode (agent quick create / manual create), each a switch list of the fields
  * that mode keeps on its dialog toolbar. Persisted client-side per workspace;
  * a field toggled off stays reachable from the dialog's ⋯ overflow and
@@ -20,6 +26,12 @@ import { SettingsCard, SettingsRow, SettingsSection } from "./settings-layout";
  */
 export function IssueTab() {
   const { t } = useT("settings");
+  const { t: tIssues } = useT("issues");
+  const kickoffMessage = useDebugSessionSettingsStore((s) => s.kickoffMessage);
+  const setKickoffMessage = useDebugSessionSettingsStore((s) => s.setKickoffMessage);
+  const defaultKickoff = tIssues(($) => $.comment.debug.kickoff_message);
+  const [kickoffDraft, setKickoffDraft] = useState<string | null>(null);
+  const kickoffValue = kickoffDraft ?? (kickoffMessage || defaultKickoff);
   const quickFields = useIssueCreateSettingsStore((s) => s.quickCreateFields);
   const setQuickVisible = useIssueCreateSettingsStore(
     (s) => s.setQuickCreateFieldVisible,
@@ -37,6 +49,35 @@ export function IssueTab() {
 
   return (
     <div className="space-y-8">
+      <SettingsSection
+        title={t(($) => $.issue.debug_title)}
+        description={t(($) => $.preferences.device_hint)}
+      >
+        <SettingsCard>
+          <SettingsRow
+            label={t(($) => $.issue.debug_kickoff_label)}
+            description={t(($) => $.issue.debug_kickoff_hint)}
+            size="text"
+            align="start"
+          >
+            <Textarea
+              name="debug-kickoff-message"
+              autoComplete="off"
+              aria-label={t(($) => $.issue.debug_kickoff_label)}
+              value={kickoffValue}
+              placeholder={defaultKickoff}
+              onChange={(event) => {
+                const next = event.target.value;
+                setKickoffDraft(next);
+                setKickoffMessage(persistDebugKickoffMessage(next, defaultKickoff));
+              }}
+              onBlur={() => setKickoffDraft(null)}
+              rows={4}
+              className="resize-y"
+            />
+          </SettingsRow>
+        </SettingsCard>
+      </SettingsSection>
       <p className="text-caption text-muted-foreground">
         {t(($) => $.preferences.issue_scope)}
       </p>

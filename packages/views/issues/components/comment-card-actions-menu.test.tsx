@@ -76,7 +76,15 @@ function comment(
 function renderThread(
   root: TimelineEntry,
   replies: TimelineEntry[],
-  { resolvable = true }: { resolvable?: boolean } = {},
+  {
+    resolvable = true,
+    onGenerateDebugSession,
+    debugIngestUnavailableAgentIds,
+  }: {
+    resolvable?: boolean;
+    onGenerateDebugSession?: (entry: TimelineEntry) => void;
+    debugIngestUnavailableAgentIds?: ReadonlySet<string>;
+  } = {},
 ) {
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   return renderWithI18n(
@@ -92,6 +100,8 @@ function renderThread(
         onToggleReaction={vi.fn()}
         onCopyLink={vi.fn()}
         onCreateSubIssue={vi.fn()}
+        onGenerateDebugSession={onGenerateDebugSession}
+        debugIngestUnavailableAgentIds={debugIngestUnavailableAgentIds}
         onResolveToggle={resolvable ? vi.fn() : undefined}
       />
     </QueryClientProvider>,
@@ -160,5 +170,31 @@ describe("CommentCard — actions menu layout", () => {
     renderThread(comment("root", null, agentAuthor), [], { resolvable: false });
 
     expect(await openMenuLayout(0)).toEqual(["Copy", "Copy link", "Create sub-issue from here"]);
+  });
+
+  it("places Generate debug session after Create sub-issue on an agent comment", async () => {
+    renderThread(comment("root", null, agentAuthor), [], {
+      resolvable: false,
+      onGenerateDebugSession: vi.fn(),
+    });
+
+    expect(await openMenuLayout(0)).toEqual([
+      "Copy",
+      "Copy link",
+      "Create sub-issue from here",
+      "Generate debug session",
+    ]);
+  });
+
+  it("disables Generate debug session when the agent's daemon lacks ingest", async () => {
+    renderThread(comment("root", null, agentAuthor), [], {
+      resolvable: false,
+      onGenerateDebugSession: vi.fn(),
+      debugIngestUnavailableAgentIds: new Set(["agent-1"]),
+    });
+
+    fireEvent.click(screen.getAllByRole("button", { name: "Comment actions" })[0]!);
+    const item = await screen.findByRole("menuitem", { name: "Generate debug session" });
+    expect(item).toHaveAttribute("aria-disabled", "true");
   });
 });

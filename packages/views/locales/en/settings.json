@@ -318,6 +318,9 @@
   },
   "issue": {
     "description": "Choose which fields each create dialog keeps on its toolbar. Hidden fields stay available from the ⋯ menu and reappear while they hold a value.",
+    "debug_title": "Debug",
+    "debug_kickoff_label": "Generate debug session",
+    "debug_kickoff_hint": "The agent mention is added automatically.",
     "quick_create_title": "Create with agent toolbar fields",
     "manual_create_title": "Manual create toolbar fields",
     "fields": {
